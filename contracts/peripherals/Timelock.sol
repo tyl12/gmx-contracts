@@ -227,6 +227,7 @@ contract Timelock is ITimelock {
         );
     }
 
+    //enable vault的 leverage, 同时设置好vault的fee
     function enableLeverage(address _vault) external override onlyHandlerAndAbove {
         IVault vault = IVault(_vault);
 

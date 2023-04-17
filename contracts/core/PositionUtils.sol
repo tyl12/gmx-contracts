@@ -65,7 +65,7 @@ library PositionUtils {
         bool _isLong,
         uint256 _price
     ) external {
-        uint256 markPrice = _isLong ? IVault(_vault).getMaxPrice(_indexToken) : IVault(_vault).getMinPrice(_indexToken);
+        uint256 markPrice = _isLong ? IVault(_vault).getMaxPrice(_indexToken) : IVault(_vault).getMinPrice(_indexToken);//做多相当于买入，取高价； 做空相当于卖出，取低价
         if (_isLong) {
             require(markPrice <= _price, "markPrice > price");
         } else {

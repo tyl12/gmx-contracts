@@ -145,6 +145,7 @@ contract BasePositionManager is IBasePositionManager, ReentrancyGuard, Governabl
         emit SetMaxGlobalSizes(_tokens, _longSizes, _shortSizes);
     }
 
+    //只有admin才能提取fee
     function withdrawFees(address _token, address _receiver) external onlyAdmin {
         uint256 amount = feeReserves[_token];
         if (amount == 0) { return; }
@@ -184,7 +185,7 @@ contract BasePositionManager is IBasePositionManager, ReentrancyGuard, Governabl
     function _increasePosition(address _account, address _collateralToken, address _indexToken, uint256 _sizeDelta, bool _isLong, uint256 _price) internal {
         _validateMaxGlobalSize(_indexToken, _isLong, _sizeDelta);
 
-        PositionUtils.increasePosition(
+        PositionUtils.increasePosition( //调用到 具体的plugin, pluginIncreasePosition
             vault,
             router,
             shortsTracker,
@@ -244,7 +245,7 @@ contract BasePositionManager is IBasePositionManager, ReentrancyGuard, Governabl
             IWETH(weth).deposit{value: msg.value}();
         }
     }
-
+    //从当前合约提取amountOut,转发给receiver,如果执行失败，则wrap成 weth重新发送
     function _transferOutETHWithGasLimitFallbackToWeth(uint256 _amountOut, address payable _receiver) internal {
         IWETH _weth = IWETH(weth);
         _weth.withdraw(_amountOut);
@@ -281,7 +282,7 @@ contract BasePositionManager is IBasePositionManager, ReentrancyGuard, Governabl
             uint256 afterFeeAmount = _amountIn.mul(BASIS_POINTS_DIVISOR.sub(depositFee)).div(BASIS_POINTS_DIVISOR);
             uint256 feeAmount = _amountIn.sub(afterFeeAmount);
             address feeToken = _path[_path.length - 1];
-            feeReserves[feeToken] = feeReserves[feeToken].add(feeAmount);
+            feeReserves[feeToken] = feeReserves[feeToken].add(feeAmount);// feeToken使用的是最后output的token，统计在 feeReserves[]中
             return afterFeeAmount;
         }
 

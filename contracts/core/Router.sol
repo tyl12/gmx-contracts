@@ -182,14 +182,15 @@ contract Router is IRouter {
         _receiver.sendValue(_amountOut);
     }
 
+    //调用前，需要先将path0 token 转入 vault, 通过该函数转换成 path[-1] 后，发送给receiver
     function _swap(address[] memory _path, uint256 _minOut, address _receiver) private returns (uint256) {
         if (_path.length == 2) {
             return _vaultSwap(_path[0], _path[1], _minOut, _receiver);
         }
         if (_path.length == 3) {
-            uint256 midOut = _vaultSwap(_path[0], _path[1], 0, address(this));
-            IERC20(_path[1]).safeTransfer(vault, midOut);
-            return _vaultSwap(_path[1], _path[2], _minOut, _receiver);
+            uint256 midOut = _vaultSwap(_path[0], _path[1], 0, address(this));//let vault transfer path0 => path1, output to this contract
+            IERC20(_path[1]).safeTransfer(vault, midOut);//transfer to vault from this contract
+            return _vaultSwap(_path[1], _path[2], _minOut, _receiver); //let vault transfer path1=>path2, output to receiver
         }
 
         revert("Router: invalid _path.length");
@@ -214,6 +215,7 @@ contract Router is IRouter {
         return msg.sender;
     }
 
+    //##@@## 调用方 (msg.sender) 是一个有效的plugin, 即，之前通过 addplugin注册过的合约; 且 account 之前approve过该plugin
     function _validatePlugin(address _account) private view {
         require(plugins[msg.sender], "Router: invalid plugin");
         require(approvedPlugins[_account][msg.sender], "Router: plugin not approved");

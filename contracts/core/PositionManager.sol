@@ -43,7 +43,7 @@ contract PositionManager is BasePositionManager {
 
     constructor(
         address _vault,
-        address _router,
+        address _router, // ## position router
         address _shortsTracker,
         address _weth,
         uint256 _depositFee,
@@ -77,9 +77,11 @@ contract PositionManager is BasePositionManager {
         emit SetShouldValidateIncreaseOrder(_shouldValidateIncreaseOrder);
     }
 
+    //做多要ETH,做空要USD,将资金转入当前合约，扣除fee,转入vault
+    //如果非要求的币，则需要通过vault进行token转换，vault的中转本身也会扣除swap fee,
     function increasePosition(
-        address[] memory _path,
-        address _indexToken,
+        address[] memory _path, //如果需要通过vault做swap,则[tokenIn, tokenOut]， 如果本身就是indexToken,则[indexToken]
+        address _indexToken,   //做多的目标token, 做多ETH,则为ETH   TODO: 为何需要单独传？不使用 path[-1]??
         uint256 _amountIn,
         uint256 _minOut,
         uint256 _sizeDelta,
@@ -90,14 +92,14 @@ contract PositionManager is BasePositionManager {
 
         if (_amountIn > 0) {
             if (_path.length == 1) {
-                IRouter(router).pluginTransfer(_path[0], msg.sender, address(this), _amountIn);
+                IRouter(router).pluginTransfer(_path[0], msg.sender, address(this), _amountIn);//positionmanager 本身作为一个plugin调用到 router,讲 amountIn 从msgsender转到当前合约
             } else {
-                IRouter(router).pluginTransfer(_path[0], msg.sender, vault, _amountIn);
+                IRouter(router).pluginTransfer(_path[0], msg.sender, vault, _amountIn); //如果需要多跳，则通过vault中转
                 _amountIn = _swap(_path, _minOut, address(this));
             }
 
-            uint256 afterFeeAmount = _collectFees(msg.sender, _path, _amountIn, _indexToken, _isLong, _sizeDelta);
-            IERC20(_path[_path.length - 1]).safeTransfer(vault, afterFeeAmount);
+            uint256 afterFeeAmount = _collectFees(msg.sender, _path, _amountIn, _indexToken, _isLong, _sizeDelta);//fee 计入 reserveFee，按照outputtoken
+            IERC20(_path[_path.length - 1]).safeTransfer(vault, afterFeeAmount); //将扣除了fee之后的余量，转给vault
         }
 
         _increasePosition(msg.sender, _path[_path.length - 1], _indexToken, _sizeDelta, _isLong, _price);

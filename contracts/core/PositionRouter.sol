@@ -228,9 +228,9 @@ contract PositionRouter is BasePositionManager, IPositionRouter {
         emit SetRequestKeysStartValues(_increasePositionRequestKeysStart, _decreasePositionRequestKeysStart);
     }
 
-    function executeIncreasePositions(uint256 _endIndex, address payable _executionFeeReceiver) external override onlyPositionKeeper {
-        uint256 index = increasePositionRequestKeysStart;
-        uint256 length = increasePositionRequestKeys.length;
+    function executeIncreasePositions(uint256 _endIndex, address payable _executionFeeReceiver) external override onlyPositionKeeper { //##@@## TODO:
+        uint256 index = increasePositionRequestKeysStart; //第一个还未执行的交易
+        uint256 length = increasePositionRequestKeys.length; //未执行的交易的数量
 
         if (index >= length) { return; }
 
@@ -248,7 +248,7 @@ contract PositionRouter is BasePositionManager, IPositionRouter {
             // higher than what the user specified, or if there is insufficient liquidity for the position
             // in case an error was thrown, cancel the request
             try this.executeIncreasePosition(key, _executionFeeReceiver) returns (bool _wasExecuted) {
-                if (!_wasExecuted) { break; }
+                if (!_wasExecuted) { break; }//执行失败，跳过当前交易，执行下一个
             } catch {
                 // wrap this call in a try catch to prevent invalid cancels from blocking the loop
                 try this.cancelIncreasePosition(key, _executionFeeReceiver) returns (bool _wasCancelled) {
@@ -297,7 +297,7 @@ contract PositionRouter is BasePositionManager, IPositionRouter {
         decreasePositionRequestKeysStart = index;
     }
 
-    function createIncreasePosition(
+    function createIncreasePosition( //##@@## TODO:
         address[] memory _path,
         address _indexToken,
         uint256 _amountIn,
@@ -310,14 +310,14 @@ contract PositionRouter is BasePositionManager, IPositionRouter {
         address _callbackTarget
     ) external payable nonReentrant returns (bytes32) {
         require(_executionFee >= minExecutionFee, "fee");
-        require(msg.value == _executionFee, "val");
+        require(msg.value == _executionFee, "val"); //##@@## transaction发送时，msg.value 需要带的 ETH
         require(_path.length == 1 || _path.length == 2, "len");
 
-        _transferInETH();
-        _setTraderReferralCode(_referralCode);
+        _transferInETH(); //## ETH deposit 到WETH合约
+        _setTraderReferralCode(_referralCode); //TODO:
 
         if (_amountIn > 0) {
-            IRouter(router).pluginTransfer(_path[0], msg.sender, address(this), _amountIn);
+            IRouter(router).pluginTransfer(_path[0], msg.sender, address(this), _amountIn); //在创建订单时，已经把用户资金 和 fee 转入当前合约
         }
 
         return _createIncreasePosition(
@@ -418,6 +418,8 @@ contract PositionRouter is BasePositionManager, IPositionRouter {
         );
     }
 
+    //positionrouter::executeIncreasePosition () => BasePositionManager::_increasePosition() => 
+    //PositionUtils::increasePosition() => router:: pluginIncreasePosition() => vault::increasePosition()
     function executeIncreasePosition(bytes32 _key, address payable _executionFeeReceiver) public nonReentrant returns (bool) {
         IncreasePositionRequest memory request = increasePositionRequests[_key];
         // if the request was already executed or cancelled, return true so that the executeIncreasePositions loop will continue executing the next request
@@ -436,12 +438,14 @@ contract PositionRouter is BasePositionManager, IPositionRouter {
                 amountIn = _swap(request.path, request.minOut, address(this));
             }
 
-            uint256 afterFeeAmount = _collectFees(request.account, request.path, amountIn, request.indexToken, request.isLong, request.sizeDelta);
+            uint256 afterFeeAmount = _collectFees(request.account, request.path, amountIn, request.indexToken, request.isLong, request.sizeDelta); //对amountout,扣掉fee之后，将剩下的资金转入vault
             IERC20(request.path[request.path.length - 1]).safeTransfer(vault, afterFeeAmount);
         }
 
-        _increasePosition(request.account, request.path[request.path.length - 1], request.indexToken, request.sizeDelta, request.isLong, request.acceptablePrice);
+        //## => BasePositionManager::_increasePosition()
+        _increasePosition(request.account, request.path[request.path.length - 1], request.indexToken, request.sizeDelta, request.isLong, request.acceptablePrice); //##@@##
 
+        //将执行fee发送给receiver
         _transferOutETHWithGasLimitFallbackToWeth(request.executionFee, _executionFeeReceiver);
 
         emit ExecuteIncreasePosition(
@@ -458,7 +462,7 @@ contract PositionRouter is BasePositionManager, IPositionRouter {
             block.timestamp.sub(request.blockTime)
         );
 
-        _callRequestCallback(request.callbackTarget, _key, true, true);
+        _callRequestCallback(request.callbackTarget, _key, true, true);//回调指定合约，通知本次执行结果
 
         return true;
     }
@@ -619,7 +623,7 @@ contract PositionRouter is BasePositionManager, IPositionRouter {
         }
 
         if (isKeeperCall) {
-            return _positionBlockNumber.add(minBlockDelayKeeper) <= block.number;
+            return _positionBlockNumber.add(minBlockDelayKeeper) <= block.number; //TODO:
         }
 
         require(msg.sender == _account, "403");
@@ -676,17 +680,20 @@ contract PositionRouter is BasePositionManager, IPositionRouter {
             tx.gasprice
         );
 
-        return requestKey;
+        return requestKey; //##@@## 得到requestkey
     }
 
+    //构建 requestkey,
+    //记录 key-> request map
+    //记录 key 到数组
     function _storeIncreasePositionRequest(IncreasePositionRequest memory _request) internal returns (uint256, bytes32) {
         address account = _request.account;
-        uint256 index = increasePositionsIndex[account].add(1);
+        uint256 index = increasePositionsIndex[account].add(1);//每个账号独立的index, ++
         increasePositionsIndex[account] = index;
         bytes32 key = getRequestKey(account, index);
 
-        increasePositionRequests[key] = _request;
-        increasePositionRequestKeys.push(key);
+        increasePositionRequests[key] = _request; //##@@## key -> request map 
+        increasePositionRequestKeys.push(key); //##@@## key queue
 
         return (index, key);
     }
@@ -781,7 +788,7 @@ contract PositionRouter is BasePositionManager, IPositionRouter {
         }
 
         bool success;
-        try IPositionRouterCallbackReceiver(_callbackTarget).gmxPositionCallback{ gas: _gasLimit }(_key, _wasExecuted, _isIncrease) {
+        try IPositionRouterCallbackReceiver(_callbackTarget).gmxPositionCallback{ gas: _gasLimit }(_key, _wasExecuted, _isIncrease) {//##@@## TODO:
             success = true;
         } catch {}
 
