@@ -591,13 +591,15 @@ contract Vault is ReentrancyGuard, IVault {
         return amountOutAfterFees;
     }
 
-    //_account是用户账号，调用方应该是account已经approve过的router合约;
+    //_account是用户账号，调用方应该是account已经approve过的router合约;调用方应该先将 collateraltoken转入当前合约再调用；
     //保证金为 collateraltoken, 做空/做多 indextoken, 开仓量为 sizeDelta USD
     //计算转入vault的collateraltoken保证金按照当前的最小价格计算出来的最小 usd 价值; => 保证金价值
-    //      按照开仓量_sizeDelta， 结合coltoken的种类， 计算需要的fee（usd计算）,从输入保证金usd价值中扣除;
-    //      position.collateral         用户保证金的usd价值
+    //      _sizeDelta：                 用户本次开仓量，usd计
+    //      collateralDelta：            用户转入的保证金数量
+    //      按照开仓量_sizeDelta，        结合coltoken的种类， 计算需要的fee（usd计算）,从输入保证金usd价值中扣除;
+    //      position.collateral         用户非全额保证金的usd价值
     //      position.size               用户仓位， 按照usd价值计
-    //      position.reserveAmount      按照用户的仓位，计算出的，需要在vault中为用户 reserve的保证金token的数量
+    //      position.reserveAmount      按照用户的仓位，计算出的，需要在vault中为用户 reserve的无杠杆保证金token的数量
 
     // account 使用 保证金 质押 token, 开仓 做多/做空 indextoken，做多/空的量是 sizedelta
     //ref to PositionRouter::executeIncreasePosition()
@@ -613,7 +615,7 @@ contract Vault is ReentrancyGuard, IVault {
         bytes32 key = getPositionKey(_account, _collateralToken, _indexToken, _isLong);
         Position storage position = positions[key];//获取account 之前已经开仓仓位数据
 
-        uint256 price = _isLong ? getMaxPrice(_indexToken) : getMinPrice(_indexToken);
+        uint256 price = _isLong ? getMaxPrice(_indexToken) : getMinPrice(_indexToken); //开仓价格
 
         if (position.size == 0) {//没有开仓过，则就是本次价格
             position.averagePrice = price;
@@ -670,10 +672,18 @@ contract Vault is ReentrancyGuard, IVault {
             _increaseGlobalShortSize(_indexToken, _sizeDelta);
         }
 
-        emit IncreasePosition(key, _account, _collateralToken, _indexToken, collateralDeltaUsd, _sizeDelta, _isLong, price, fee);
+        emit IncreasePosition(key, _account, _collateralToken, _indexToken, collateralDeltaUsd, _sizeDelta, _isLong, price, fee); //开仓价格， fee等
         emit UpdatePosition(key, position.size, position.collateral, position.averagePrice, position.entryFundingRate, position.reserveAmount, position.realisedPnl, price);
     }
 
+    //_sizeDelta： usd计 用户本次关仓量
+    //_collateralDelta: 用户期望的保证金变化量
+    //用户平多/空单
+    //    降低 reserveamount[token]记录中的，给用户reserve的collateraltoken的量
+    //    根据平仓量 和 提取的保证金数量，得到 共可从vault中提取多少usd价值，扣掉fee之后还有多少usd价值;
+    //          提取的usd价值（包含fee）按照collateraltoken的最高价，算出共可换成最少多少collateraltoken, 从vault的poolamount中扣除;
+    //          扣掉fee之后的usd价值，按照collateraltoken的最高价，算出共可换成最少多少collateraltoken, 转给用户;
+    //                  上面两个的差，就作为fee留在了vault中，以collateraltoken的形式
     function decreasePosition(address _account, address _collateralToken, address _indexToken, uint256 _collateralDelta, uint256 _sizeDelta, bool _isLong, address _receiver) external override nonReentrant returns (uint256) {
         _validateGasPrice();
         _validateRouter(_account);
@@ -690,38 +700,38 @@ contract Vault is ReentrancyGuard, IVault {
         _validate(position.size >= _sizeDelta, 32);
         _validate(position.collateral >= _collateralDelta, 33);
 
-        uint256 collateral = position.collateral;
+        uint256 collateral = position.collateral; //用户当前仓位保证金的usd价值
         // scrop variables to avoid stack too deep errors
         {
-        uint256 reserveDelta = position.reserveAmount.mul(_sizeDelta).div(position.size);//TODO: 按照 （本次平仓量/总开仓）比例获得可以释放的reserve量
+        uint256 reserveDelta = position.reserveAmount.mul(_sizeDelta).div(position.size);//TODO: 按照 （本次平仓量/总仓位）比例获得可以释放的 作为质押资金的collateral token的量
         position.reserveAmount = position.reserveAmount.sub(reserveDelta);
-        _decreaseReservedAmount(_collateralToken, reserveDelta);
+        _decreaseReservedAmount(_collateralToken, reserveDelta); //降低质押资金的记录
         }
 
-        (uint256 usdOut, uint256 usdOutAfterFee) = _reduceCollateral(_account, _collateralToken, _indexToken, _collateralDelta, _sizeDelta, _isLong);
+        (uint256 usdOut, uint256 usdOutAfterFee) = _reduceCollateral(_account, _collateralToken, _indexToken, _collateralDelta, _sizeDelta, _isLong); //TODO: 降低保证金
 
-        if (position.size != _sizeDelta) {
+        if (position.size != _sizeDelta) {//部分平仓
             position.entryFundingRate = getEntryFundingRate(_collateralToken, _indexToken, _isLong);
-            position.size = position.size.sub(_sizeDelta);
+            position.size = position.size.sub(_sizeDelta);//降低仓位
 
             _validatePosition(position.size, position.collateral);
-            validateLiquidation(_account, _collateralToken, _indexToken, _isLong, true);
+            validateLiquidation(_account, _collateralToken, _indexToken, _isLong, true); //TODO:
 
             if (_isLong) {
-                _increaseGuaranteedUsd(_collateralToken, collateral.sub(position.collateral));
+                _increaseGuaranteedUsd(_collateralToken, collateral.sub(position.collateral)); //##@@## ??? TODO:
                 _decreaseGuaranteedUsd(_collateralToken, _sizeDelta);
             }
 
-            uint256 price = _isLong ? getMinPrice(_indexToken) : getMaxPrice(_indexToken);
+            uint256 price = _isLong ? getMinP_validatePositionrice(_indexToken) : getMaxPrice(_indexToken);
             emit DecreasePosition(key, _account, _collateralToken, _indexToken, _collateralDelta, _sizeDelta, _isLong, price, usdOut.sub(usdOutAfterFee));
             emit UpdatePosition(key, position.size, position.collateral, position.averagePrice, position.entryFundingRate, position.reserveAmount, position.realisedPnl, price);
-        } else {
+        } else { //彻底关仓
             if (_isLong) {
-                _increaseGuaranteedUsd(_collateralToken, collateral);
+                _increaseGuaranteedUsd(_collateralToken, collateral); //## TODO: ?????
                 _decreaseGuaranteedUsd(_collateralToken, _sizeDelta);
             }
 
-            uint256 price = _isLong ? getMinPrice(_indexToken) : getMaxPrice(_indexToken);
+            uint256 price = _isLong ? getMinPrice(_indexToken) : getMaxPrice(_indexToken); //关仓价  //开多ETH： 开仓时，按照ETH的最高价计算用户的开仓价， 关仓时候，按照ETH的最低价计算关仓价格
             emit DecreasePosition(key, _account, _collateralToken, _indexToken, _collateralDelta, _sizeDelta, _isLong, price, usdOut.sub(usdOutAfterFee));
             emit ClosePosition(key, position.size, position.collateral, position.averagePrice, position.entryFundingRate, position.reserveAmount, position.realisedPnl);
 
@@ -729,15 +739,15 @@ contract Vault is ReentrancyGuard, IVault {
         }
 
         if (!_isLong) {
-            _decreaseGlobalShortSize(_indexToken, _sizeDelta);
+            _decreaseGlobalShortSize(_indexToken, _sizeDelta);//平空仓，则降低vault中的做空总量
         }
 
-        if (usdOut > 0) {
+        if (usdOut > 0) {//用户提取保证金
             if (_isLong) {
-                _decreasePoolAmount(_collateralToken, usdToTokenMin(_collateralToken, usdOut));
+                _decreasePoolAmount(_collateralToken, usdToTokenMin(_collateralToken, usdOut));//平多仓时，用户提取保证金，则降低pool中保证金collateraltoken的 usd价值 （用户收到的 + fee）
             }
-            uint256 amountOutAfterFees = usdToTokenMin(_collateralToken, usdOutAfterFee);
-            _transferOut(_collateralToken, amountOutAfterFees, _receiver);
+            uint256 amountOutAfterFees = usdToTokenMin(_collateralToken, usdOutAfterFee);//用户提取的保证金usd价值，扣除fee之后，最少可以换多少collateral token
+            _transferOut(_collateralToken, amountOutAfterFees, _receiver); // 把作为保证金的collateraltoken转回给用户
             return amountOutAfterFees;
         }
 
