@@ -311,7 +311,7 @@ contract OrderBook is ReentrancyGuard, IOrderBook {
         uint256 _triggerRatio, // tokenB / tokenA
         bool _triggerAboveThreshold,
         uint256 _executionFee,
-        bool _shouldWrap,
+        bool _shouldWrap,  //##@@## TODO:
         bool _shouldUnwrap
     ) external payable nonReentrant {
         require(_path.length == 2 || _path.length == 3, "OrderBook: invalid _path.length");
@@ -338,8 +338,8 @@ contract OrderBook is ReentrancyGuard, IOrderBook {
         address[] memory _path,
         uint256 _amountIn,
         uint256 _minOut,
-        uint256 _triggerRatio,
-        bool _triggerAboveThreshold,
+        uint256 _triggerRatio,  //TODO:
+        bool _triggerAboveThreshold, //TODO:
         bool _shouldUnwrap,
         uint256 _executionFee
     ) private {
@@ -390,12 +390,12 @@ contract OrderBook is ReentrancyGuard, IOrderBook {
         SwapOrder memory order = swapOrders[msg.sender][_orderIndex];
         require(order.account != address(0), "OrderBook: non-existent order");
 
-        delete swapOrders[msg.sender][_orderIndex];
+        delete swapOrders[msg.sender][_orderIndex]; //删除订单
 
         if (order.path[0] == weth) {
-            _transferOutETH(order.executionFee.add(order.amountIn), msg.sender);
+            _transferOutETH(order.executionFee.add(order.amountIn), msg.sender); //weth 入的，带着fee直接返回
         } else {
-            IERC20(order.path[0]).safeTransfer(msg.sender, order.amountIn);
+            IERC20(order.path[0]).safeTransfer(msg.sender, order.amountIn); //返回token + ETH fee
             _transferOutETH(order.executionFee, msg.sender);
         }
 
@@ -586,6 +586,9 @@ contract OrderBook is ReentrancyGuard, IOrderBook {
         );
     }
 
+    //让vault 从调用方transfer token 到当前合约
+    //通过vault swap,将输入token 转换为collatertoken
+    //资金保管在当前合约
     function createIncreaseOrder(
         address[] memory _path,
         uint256 _amountIn,
@@ -623,7 +626,7 @@ contract OrderBook is ReentrancyGuard, IOrderBook {
 
         {
             uint256 _purchaseTokenAmountUsd = IVault(vault).tokenToUsdMin(_purchaseToken, _purchaseTokenAmount);
-            require(_purchaseTokenAmountUsd >= minPurchaseTokenAmountUsd, "OrderBook: insufficient collateral");
+            require(_purchaseTokenAmountUsd >= minPurchaseTokenAmountUsd, "OrderBook: insufficient collateral"); //最小开仓量限制
         }
 
         _createIncreaseOrder(
@@ -747,7 +750,7 @@ contract OrderBook is ReentrancyGuard, IOrderBook {
 
         delete increaseOrders[_address][_orderIndex];
 
-        IERC20(order.purchaseToken).safeTransfer(vault, order.purchaseTokenAmount);
+        IERC20(order.purchaseToken).safeTransfer(vault, order.purchaseTokenAmount);// 从当前合约转入vault
 
         if (order.purchaseToken != order.collateralToken) {
             address[] memory path = new address[](2);

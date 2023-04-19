@@ -52,17 +52,17 @@ contract PositionManager is BasePositionManager {
         orderBook = _orderBook;
     }
 
-    function setOrderKeeper(address _account, bool _isActive) external onlyAdmin {
+    function setOrderKeeper(address _account, bool _isActive) external onlyAdmin { //TODO:
         isOrderKeeper[_account] = _isActive;
         emit SetOrderKeeper(_account, _isActive);
     }
 
-    function setLiquidator(address _account, bool _isActive) external onlyAdmin {
+    function setLiquidator(address _account, bool _isActive) external onlyAdmin { //TODO:
         isLiquidator[_account] = _isActive;
         emit SetLiquidator(_account, _isActive);
     }
 
-    function setPartner(address _account, bool _isActive) external onlyAdmin {
+    function setPartner(address _account, bool _isActive) external onlyAdmin { //TODO:
         isPartner[_account] = _isActive;
         emit SetPartner(_account, _isActive);
     }
@@ -78,7 +78,9 @@ contract PositionManager is BasePositionManager {
     }
 
     //做多要ETH,做空要USD,将资金转入当前合约，扣除fee,转入vault
-    //如果非要求的币，则需要通过vault进行token转换，vault的中转本身也会扣除swap fee,
+    //如果不是要求的币，则需要通过vault进行token转换，vault的中转本身也会扣除swap fee,
+    //转换方式： 
+    //          不需要转换： token直接从用户转入当前合约，扣fee,剩余的从当前合约转入vault, 调用 IRouter(_router).pluginIncreasePosition => IVault(vault).increasePosition
     function increasePosition(
         address[] memory _path, //如果需要通过vault做swap,则[tokenIn, tokenOut]， 如果本身就是indexToken,则[indexToken]
         address _indexToken,   //做多的目标token, 做多ETH,则为ETH   TODO: 为何需要单独传？不使用 path[-1]??
@@ -95,10 +97,10 @@ contract PositionManager is BasePositionManager {
                 IRouter(router).pluginTransfer(_path[0], msg.sender, address(this), _amountIn);//positionmanager 本身作为一个plugin调用到 router,讲 amountIn 从msgsender转到当前合约
             } else {
                 IRouter(router).pluginTransfer(_path[0], msg.sender, vault, _amountIn); //如果需要多跳，则通过vault中转
-                _amountIn = _swap(_path, _minOut, address(this));
+                _amountIn = _swap(_path, _minOut, address(this));//只支持2 path
             }
 
-            uint256 afterFeeAmount = _collectFees(msg.sender, _path, _amountIn, _indexToken, _isLong, _sizeDelta);//fee 计入 reserveFee，按照outputtoken
+            uint256 afterFeeAmount = _collectFees(msg.sender, _path, _amountIn, _indexToken, _isLong, _sizeDelta);//??deposit fee for swap via desposit/withdraw; fee 计入 reserveFee，按照outputtoken
             IERC20(_path[_path.length - 1]).safeTransfer(vault, afterFeeAmount); //将扣除了fee之后的余量，转给vault
         }
 
@@ -200,7 +202,7 @@ contract PositionManager is BasePositionManager {
         address _collateralToken,
         address _indexToken,
         bool _isLong,
-        address _feeReceiver
+        address _feeReceiver //##@@## TODO:
     ) external nonReentrant onlyLiquidator {
         address _vault = vault;
         address timelock = IVault(_vault).gov();

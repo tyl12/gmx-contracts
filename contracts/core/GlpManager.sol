@@ -217,7 +217,7 @@ contract GlpManager is ReentrancyGuard, Governable, IGlpManager {
         uint256 usdgAmount = vault.buyUSDG(_token, address(this));
         require(usdgAmount >= _minUsdg, "GlpManager: insufficient USDG output");
 
-        uint256 mintAmount = aumInUsdg == 0 ? usdgAmount : usdgAmount.mul(glpSupply).div(aumInUsdg);
+        uint256 mintAmount = aumInUsdg == 0 ? usdgAmount : usdgAmount.mul(glpSupply).div(aumInUsdg);//????
         require(mintAmount >= _minGlp, "GlpManager: insufficient GLP output");
 
         IMintable(glp).mint(_account, mintAmount);

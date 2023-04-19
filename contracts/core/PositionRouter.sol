@@ -434,11 +434,13 @@ contract PositionRouter is BasePositionManager, IPositionRouter {
             uint256 amountIn = request.amountIn;
 
             if (request.path.length > 1) {
-                IERC20(request.path[0]).safeTransfer(vault, request.amountIn);
+                IERC20(request.path[0]).safeTransfer(vault, request.amountIn); //从当前合约转款给vault, swap之后，回到当前合约
                 amountIn = _swap(request.path, request.minOut, address(this));
             }
 
+            //fee 是扣在最后的输出token上的
             uint256 afterFeeAmount = _collectFees(request.account, request.path, amountIn, request.indexToken, request.isLong, request.sizeDelta); //对amountout,扣掉fee之后，将剩下的资金转入vault
+            //扣掉fee之后，转vault
             IERC20(request.path[request.path.length - 1]).safeTransfer(vault, afterFeeAmount);
         }
 

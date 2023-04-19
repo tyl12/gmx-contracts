@@ -591,6 +591,9 @@ contract Vault is ReentrancyGuard, IVault {
         return amountOutAfterFees;
     }
 
+    //加减仓（开关仓）的时候会按照仓位量扣除margin fee, 包含两部分：positionFee 和 fundingfee ，  都是从collateraltoken形式扣除的
+    //爆仓清算时，会收取一个 marginfee,也是从collateraltoken形式扣减
+
     //_account是用户账号，调用方应该是account已经approve过的router合约;调用方应该先将 collateraltoken转入当前合约再调用；
     //保证金为 collateraltoken, 做空/做多 indextoken, 开仓量为 sizeDelta USD
     //计算转入vault的collateraltoken保证金按照当前的最小价格计算出来的最小 usd 价值; => 保证金价值
@@ -663,7 +666,7 @@ contract Vault is ReentrancyGuard, IVault {
             _increasePoolAmount(_collateralToken, collateralDelta);//用户存入valut的质押token量 - 扣除的usd计的fee 可买到的最小 coltoken量
             // fees need to be deducted from the pool since fees are deducted from position.collateral
             // and collateral is treated as part of the pool
-            _decreasePoolAmount(_collateralToken, usdToTokenMin(_collateralToken, fee));
+            _decreasePoolAmount(_collateralToken, usdToTokenMin(_collateralToken, fee));// 和前面 _collectMarginFees 中的 usdToTokenMin()调用相对应
         } else {
             if (globalShortSizes[_indexToken] == 0) {
                 globalShortAveragePrices[_indexToken] = price;
@@ -677,9 +680,6 @@ contract Vault is ReentrancyGuard, IVault {
         emit IncreasePosition(key, _account, _collateralToken, _indexToken, collateralDeltaUsd, _sizeDelta, _isLong, price, fee); //开仓价格， fee等
         emit UpdatePosition(key, position.size, position.collateral, position.averagePrice, position.entryFundingRate, position.reserveAmount, position.realisedPnl, price);
     }
-
-    //加减仓（开关仓）的时候会按照仓位量扣除fee, 都是从collateraltoken形式扣除的
-    //爆仓清算时，会收取一个 marginfee,也是从collateraltoken形式扣减
 
     //_sizeDelta： usd计 用户本次关仓量
     //_collateralDelta: 用户期望的保证金变化量
@@ -713,6 +713,7 @@ contract Vault is ReentrancyGuard, IVault {
         _decreaseReservedAmount(_collateralToken, reserveDelta); //降低质押资金的记录
         }
 
+        //期中会扣除fee
         (uint256 usdOut, uint256 usdOutAfterFee) = _reduceCollateral(_account, _collateralToken, _indexToken, _collateralDelta, _sizeDelta, _isLong); //TODO: 降低保证金
 
         if (position.size != _sizeDelta) {//部分平仓
@@ -1171,11 +1172,12 @@ contract Vault is ReentrancyGuard, IVault {
         return afterFeeAmount;
     }
 
+    //fee 包含 两部分， positionfee 和 funding fee
     //fee是按照collateral token收取的，计入feeReserves[_collateralToken]; 返回的是fee对应的usdg价值
     function _collectMarginFees(address _account, address _collateralToken, address _indexToken, bool _isLong, uint256 _sizeDelta, uint256 _size, uint256 _entryFundingRate) private returns (uint256) {
-        uint256 feeUsd = getPositionFee(_account, _collateralToken, _indexToken, _isLong, _sizeDelta);
+        uint256 feeUsd = getPositionFee(_account, _collateralToken, _indexToken, _isLong, _sizeDelta); //TODO:
 
-        uint256 fundingFee = getFundingFee(_account, _collateralToken, _indexToken, _isLong, _size, _entryFundingRate);
+        uint256 fundingFee = getFundingFee(_account, _collateralToken, _indexToken, _isLong, _size, _entryFundingRate); //TODO:
         feeUsd = feeUsd.add(fundingFee);
 
         uint256 feeTokens = usdToTokenMin(_collateralToken, feeUsd);
@@ -1194,6 +1196,7 @@ contract Vault is ReentrancyGuard, IVault {
         return nextBalance.sub(prevBalance);
     }
 
+    //！！receiver不能是valut本身，否则tokenbalances不更新，会造成后面计算transferIn的量出错
     function _transferOut(address _token, uint256 _amount, address _receiver) private {
         IERC20(_token).safeTransfer(_receiver, _amount);
         tokenBalances[_token] = IERC20(_token).balanceOf(address(this));

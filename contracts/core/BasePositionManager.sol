@@ -205,7 +205,7 @@ contract BasePositionManager is IBasePositionManager, ReentrancyGuard, Governabl
 
         uint256 markPrice = _isLong ? IVault(_vault).getMinPrice(_indexToken) : IVault(_vault).getMaxPrice(_indexToken);
         if (_isLong) {
-            require(markPrice >= _price, "markPrice < price");
+            require(markPrice >= _price, "markPrice < price"); // TODO: ???
         } else {
             require(markPrice <= _price, "markPrice > price");
         }
@@ -267,7 +267,7 @@ contract BasePositionManager is IBasePositionManager, ReentrancyGuard, Governabl
         bool _isLong,
         uint256 _sizeDelta
     ) internal returns (uint256) {
-        bool shouldDeductFee = PositionUtils.shouldDeductFee(
+        bool shouldDeductFee = PositionUtils.shouldDeductFee( //##@@## TODO:  防止通过increaseposition方式来实现swap, 内部通过杠杆率的变化来判断， 允许 1%, 开空不收
             vault,
             _account,
             _path,
@@ -275,7 +275,7 @@ contract BasePositionManager is IBasePositionManager, ReentrancyGuard, Governabl
             _indexToken,
             _isLong,
             _sizeDelta,
-            increasePositionBufferBps
+            increasePositionBufferBps  //100/10000,  1%
         );
 
         if (shouldDeductFee) {

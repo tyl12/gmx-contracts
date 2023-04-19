@@ -66,10 +66,11 @@ contract Router is IRouter {
     }
 
     function pluginTransfer(address _token, address _account, address _receiver, uint256 _amount) external override {
-        _validatePlugin(_account);
+        _validatePlugin(_account); //调用方合约需要是一个plugin,且account approve过该plugin合约
         IERC20(_token).safeTransferFrom(_account, _receiver, _amount);
     }
 
+    //调用方plugin 事先已经做完token的转入， swap, 转入vault等动作，此处直接调用 vault.increasePosition
     function pluginIncreasePosition(address _account, address _collateralToken, address _indexToken, uint256 _sizeDelta, bool _isLong) external override {
         _validatePlugin(_account);
         IVault(vault).increasePosition(_account, _collateralToken, _indexToken, _sizeDelta, _isLong);
@@ -106,6 +107,7 @@ contract Router is IRouter {
         emit Swap(msg.sender, _path[0], _path[_path.length - 1], _amountIn, amountOut);
     }
 
+    //Router 合约主动从sender处提款， swap, 转入vault， 调用 vault.increasePosition
     function increasePosition(address[] memory _path, address _indexToken, uint256 _amountIn, uint256 _minOut, uint256 _sizeDelta, bool _isLong, uint256 _price) external {
         if (_amountIn > 0) {
             IERC20(_path[0]).safeTransferFrom(_sender(), vault, _amountIn);
@@ -188,6 +190,9 @@ contract Router is IRouter {
             return _vaultSwap(_path[0], _path[1], _minOut, _receiver);
         }
         if (_path.length == 3) {
+            //为何不直接将vaultswap的rec指定为vault本身，而需要通过router接收中转一下？
+            //ans: vaultswap::_transferOut() 中，swap最后会将outputtoken转给receiver,然后更新 内部变量 tokenBalances[_token] = IERC20(_token).balanceOf(address(this));
+            //如果这里直接存入vault,则下面第二个vaultswap判断输入token量就会出错
             uint256 midOut = _vaultSwap(_path[0], _path[1], 0, address(this));//let vault transfer path0 => path1, output to this contract
             IERC20(_path[1]).safeTransfer(vault, midOut);//transfer to vault from this contract
             return _vaultSwap(_path[1], _path[2], _minOut, _receiver); //let vault transfer path1=>path2, output to receiver
