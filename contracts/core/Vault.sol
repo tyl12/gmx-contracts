@@ -604,7 +604,7 @@ contract Vault is ReentrancyGuard, IVault {
     //      position.size               用户仓位， 按照usd价值计
     //      position.reserveAmount      按照用户的仓位，计算出的，需要在vault中为用户 reserve的无杠杆保证金token的数量
 
-    //注意： 开空时，并没有更新 guaranteedUSD 和 poolamount, 是在清算时才会更新
+    //注意： 开空时，开仓时并没有更新 guaranteedUSD 和 poolamount, 是在清算时才会更新
 
     // account 使用 保证金 质押 token, 开仓 做多/做空 indextoken，做多/空的量是 sizedelta
     //ref to PositionRouter::executeIncreasePosition()
@@ -759,7 +759,6 @@ contract Vault is ReentrancyGuard, IVault {
 
         return 0;
     }
-
 
     //保证金足够，则直接_decreasePosition
     function liquidatePosition(address _account, address _collateralToken, address _indexToken, bool _isLong, address _feeReceiver) external override nonReentrant {
