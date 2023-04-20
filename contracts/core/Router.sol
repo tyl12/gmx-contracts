@@ -91,7 +91,7 @@ contract Router is IRouter {
         uint256 amountOut = _swap(_path, _minOut, _receiver);
         emit Swap(msg.sender, _path[0], _path[_path.length - 1], _amountIn, amountOut);
     }
-
+    //send ETH, wrap to WETH by router, path[0] should be WETH,
     function swapETHToTokens(address[] memory _path, uint256 _minOut, address _receiver) external payable {
         require(_path[0] == weth, "Router: invalid _path");
         _transferETHToVault();

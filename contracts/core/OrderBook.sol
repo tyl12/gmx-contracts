@@ -305,13 +305,13 @@ contract OrderBook is ReentrancyGuard, IOrderBook {
     }
 
     function createSwapOrder(
-        address[] memory _path,
+        address[] memory _path,//swap路径，ETH则为 WETH
         uint256 _amountIn,
         uint256 _minOut,
         uint256 _triggerRatio, // tokenB / tokenA
-        bool _triggerAboveThreshold,
-        uint256 _executionFee,
-        bool _shouldWrap,  //##@@## TODO:
+        bool _triggerAboveThreshold,//execute时是否检查 triggerRatio
+        uint256 _executionFee,// 和msg.value保持一致
+        bool _shouldWrap,  //输入是否是ETH
         bool _shouldUnwrap
     ) external payable nonReentrant {
         require(_path.length == 2 || _path.length == 3, "OrderBook: invalid _path.length");
@@ -322,10 +322,10 @@ contract OrderBook is ReentrancyGuard, IOrderBook {
         // always need this call because of mandatory executionFee user has to transfer in ETH
         _transferInETH();
 
-        if (_shouldWrap) {
+        if (_shouldWrap) {//使用ETH做swap, 则path[0] 传入 WETH, msg.value 为 fee + swapamount
             require(_path[0] == weth, "OrderBook: only weth could be wrapped");
             require(msg.value == _executionFee.add(_amountIn), "OrderBook: incorrect value transferred");
-        } else {
+        } else {// 非eth, 则msg.value全部作为 executionfee, 且其值需和参数匹配
             require(msg.value == _executionFee, "OrderBook: incorrect execution fee transferred");
             IRouter(router).pluginTransfer(_path[0], msg.sender, address(this), _amountIn);
         }
@@ -343,7 +343,7 @@ contract OrderBook is ReentrancyGuard, IOrderBook {
         bool _shouldUnwrap,
         uint256 _executionFee
     ) private {
-        uint256 _orderIndex = swapOrdersIndex[_account];
+        uint256 _orderIndex = swapOrdersIndex[_account];//orderindex 从0 开始累计
         SwapOrder memory order = SwapOrder(
             _account,
             _path,
@@ -385,7 +385,8 @@ contract OrderBook is ReentrancyGuard, IOrderBook {
             cancelDecreaseOrder(_decreaseOrderIndexes[i]);
         }
     }
-
+    //删除订单记录
+    //转回fee 和 token 给用户
     function cancelSwapOrder(uint256 _orderIndex) public nonReentrant {
         SwapOrder memory order = swapOrders[msg.sender][_orderIndex];
         require(order.account != address(0), "OrderBook: non-existent order");
@@ -442,7 +443,7 @@ contract OrderBook is ReentrancyGuard, IOrderBook {
         // That's why in such scenario BNB should be used to determine price of USDG
         if (tokenA == usdg) {
             // with both _path.length == 2 or 3 we need usdg price against _path[1]
-            tokenAPrice = getUsdgMinPrice(_path[1]);
+            tokenAPrice = getUsdgMinPrice(_path[1]);//##@@## TODO: ???
         } else {
             tokenAPrice = IVault(vault).getMinPrice(tokenA);
         }
@@ -479,8 +480,13 @@ contract OrderBook is ReentrancyGuard, IOrderBook {
             order.executionFee
         );
     }
-
-    function executeSwapOrder(address _account, uint256 _orderIndex, address payable _feeReceiver) override external nonReentrant {
+    //检查trigger参数
+    //删除订单记录
+    //token 转入vault, 按照订单path swap,输出指定给用户
+    //给执行方 交付fee
+    function executeSwapOrder(address _account, 
+        uint256 _orderIndex, 
+        address payable _feeReceiver) override external nonReentrant {
         SwapOrder memory order = swapOrders[_account][_orderIndex];
         require(order.account != address(0), "OrderBook: non-existent order");
 
@@ -526,11 +532,11 @@ contract OrderBook is ReentrancyGuard, IOrderBook {
         bool _triggerAboveThreshold,
         uint256 _triggerPrice,
         address _indexToken,
-        bool _maximizePrice,
+        bool _maximizePrice, //isLong
         bool _raise
     ) public view returns (uint256, bool) {
         uint256 currentPrice = _maximizePrice
-            ? IVault(vault).getMaxPrice(_indexToken) : IVault(vault).getMinPrice(_indexToken);
+            ? IVault(vault).getMaxPrice(_indexToken) : IVault(vault).getMinPrice(_indexToken); //看多取当前高价，看空取低价
         bool isPriceValid = _triggerAboveThreshold ? currentPrice > _triggerPrice : currentPrice < _triggerPrice;
         if (_raise) {
             require(isPriceValid, "OrderBook: invalid price for execution");
@@ -590,15 +596,15 @@ contract OrderBook is ReentrancyGuard, IOrderBook {
     //通过vault swap,将输入token 转换为collatertoken
     //资金保管在当前合约
     function createIncreaseOrder(
-        address[] memory _path,
+        address[] memory _path,// create时只是swap path[0]到path[-1] 可以！= collateralToken， 在create时执行
         uint256 _amountIn,
-        address _indexToken,
-        uint256 _minOut,
-        uint256 _sizeDelta,
-        address _collateralToken,
+        address _indexToken, //做空/多目标token
+        uint256 _minOut, //针对path[-1] swap结果
+        uint256 _sizeDelta, //做空/多量，USD计
+        address _collateralToken, //保证金token，在execute时执行 path[-1]-> collateraltoken
         bool _isLong,
         uint256 _triggerPrice,
-        bool _triggerAboveThreshold,
+        bool _triggerAboveThreshold, //同swaporder
         uint256 _executionFee,
         bool _shouldWrap
     ) external payable nonReentrant {
@@ -686,7 +692,10 @@ contract OrderBook is ReentrancyGuard, IOrderBook {
         );
     }
 
-    function updateIncreaseOrder(uint256 _orderIndex, uint256 _sizeDelta, uint256 _triggerPrice, bool _triggerAboveThreshold) external nonReentrant {
+    function updateIncreaseOrder(uint256 _orderIndex, 
+        uint256 _sizeDelta, 
+        uint256 _triggerPrice, 
+        bool _triggerAboveThreshold) external nonReentrant {
         IncreaseOrder storage order = increaseOrders[msg.sender][_orderIndex];
         require(order.account != address(0), "OrderBook: non-existent order");
 
@@ -734,13 +743,15 @@ contract OrderBook is ReentrancyGuard, IOrderBook {
         );
     }
 
-    function executeIncreaseOrder(address _address, uint256 _orderIndex, address payable _feeReceiver) override external nonReentrant {
+    function executeIncreaseOrder(address _address, 
+        uint256 _orderIndex, 
+        address payable _feeReceiver) override external nonReentrant {
         IncreaseOrder memory order = increaseOrders[_address][_orderIndex];
         require(order.account != address(0), "OrderBook: non-existent order");
 
         // increase long should use max price
         // increase short should use min price
-        (uint256 currentPrice, ) = validatePositionOrderPrice(
+        (uint256 currentPrice, ) = validatePositionOrderPrice( //TODO: ???
             order.triggerAboveThreshold,
             order.triggerPrice,
             order.indexToken,
@@ -752,6 +763,7 @@ contract OrderBook is ReentrancyGuard, IOrderBook {
 
         IERC20(order.purchaseToken).safeTransfer(vault, order.purchaseTokenAmount);// 从当前合约转入vault
 
+        //createIncreaseOrder 时基于path做完path[0]->path[-1]的swap,此处判断上次的swap目标path[-1]不是collateraltoken时，加做一次swap
         if (order.purchaseToken != order.collateralToken) {
             address[] memory path = new address[](2);
             path[0] = order.purchaseToken;

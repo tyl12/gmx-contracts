@@ -228,7 +228,8 @@ contract PositionRouter is BasePositionManager, IPositionRouter {
         emit SetRequestKeysStartValues(_increasePositionRequestKeysStart, _decreasePositionRequestKeysStart);
     }
 
-    function executeIncreasePositions(uint256 _endIndex, address payable _executionFeeReceiver) external override onlyPositionKeeper { //##@@## TODO:
+    function executeIncreasePositions(uint256 _endIndex,
+        address payable _executionFeeReceiver) external override onlyPositionKeeper { //##@@## TODO:
         uint256 index = increasePositionRequestKeysStart; //第一个还未执行的交易
         uint256 length = increasePositionRequestKeys.length; //未执行的交易的数量
 
@@ -313,11 +314,11 @@ contract PositionRouter is BasePositionManager, IPositionRouter {
         require(msg.value == _executionFee, "val"); //##@@## transaction发送时，msg.value 需要带的 ETH
         require(_path.length == 1 || _path.length == 2, "len");
 
-        _transferInETH(); //## ETH deposit 到WETH合约
+        _transferInETH(); //## ETH deposit 到WETH合约, 作为executionfee
         _setTraderReferralCode(_referralCode); //TODO:
 
         if (_amountIn > 0) {
-            IRouter(router).pluginTransfer(_path[0], msg.sender, address(this), _amountIn); //在创建订单时，已经把用户资金 和 fee 转入当前合约
+            IRouter(router).pluginTransfer(_path[0], msg.sender, address(this), _amountIn); //在创建long/short market 订单前，用户需要approvevault使用path[0] token, 
         }
 
         return _createIncreasePosition(
@@ -425,6 +426,8 @@ contract PositionRouter is BasePositionManager, IPositionRouter {
         // if the request was already executed or cancelled, return true so that the executeIncreasePositions loop will continue executing the next request
         if (request.account == address(0)) { return true; }
 
+        //执行时间点太晚， expire
+        //keeper和普通用户需要满足各自的delay才允许执行
         bool shouldExecute = _validateExecution(request.blockNumber, request.blockTime, request.account);
         if (!shouldExecute) { return false; }
 
@@ -625,7 +628,7 @@ contract PositionRouter is BasePositionManager, IPositionRouter {
         }
 
         if (isKeeperCall) {
-            return _positionBlockNumber.add(minBlockDelayKeeper) <= block.number; //TODO:
+            return _positionBlockNumber.add(minBlockDelayKeeper) <= block.number; //keeper 和普通调用者需要满足各自的delay条件
         }
 
         require(msg.sender == _account, "403");
@@ -658,7 +661,7 @@ contract PositionRouter is BasePositionManager, IPositionRouter {
             _isLong,
             _acceptablePrice,
             _executionFee,
-            block.number,
+            block.number, //用于keeper执行时间点检查
             block.timestamp,
             _hasCollateralInETH,
             _callbackTarget
