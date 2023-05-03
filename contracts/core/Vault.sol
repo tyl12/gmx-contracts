@@ -78,7 +78,7 @@ contract Vault is ReentrancyGuard, IVault {
 
     uint256 public override maxGasPrice;
 
-    mapping (address => mapping (address => bool)) public override approvedRouters;
+    mapping (address => mapping (address => bool)) public override approvedRouters; //msgsender 名下批准的router
     mapping (address => bool) public override isLiquidator;
     mapping (address => bool) public override isManager;
 
@@ -416,7 +416,7 @@ contract Vault is ReentrancyGuard, IVault {
         return amount;
     }
 
-    //msgsender 名下批准的router, => 可以自行添加
+    //plugin 合约发起，approve router => 可以自行添加
     function addRouter(address _router) external {
         approvedRouters[msg.sender][_router] = true;
     }
@@ -457,10 +457,10 @@ contract Vault is ReentrancyGuard, IVault {
     }
 
     //权限： manager模式时，只有manager有权限，否则无限制
-    //overall: 相当于token充入vault，扣除fee之后，换成usdg; vault中token对应的usdg价值增加了， pool中token的量增加了
+    //overall: token充入vault，扣除fee之后，换成usdg; vault中token对应的usdg价值增加了， pool中token的量增加了
     //读取vault当前balance和计数之间的差值，就是转入的tokenamount
     //按照token的最小price，计算对应的usdgAmount, 转换成带decimal的量， wei 单位 
-    //基于输入token的量usdgamount计算fee的比例，fee在原始输入token上扣除，计入相应的feeReserves[_token]，扣的是token,不是usdg; 
+    //基于输入token的量usdgamount计算fee的比例，fee在原始输入token上扣除，计入相应的feeReserves[_token]，扣的是tokenin,not usdg; 
     //扣减fee之后，剩下的token 对应的usdgamount 计入 token对应的 usdgAmounts[_token] 量 => 以 usdg计的token的供应量增加了多少
     //扣减fee之后，剩下的token 计入 token对应的 poolAmounts[_token]
     function buyUSDG(address _token, address _receiver) external override nonReentrant returns (uint256) {
@@ -497,7 +497,7 @@ contract Vault is ReentrancyGuard, IVault {
         return mintAmount;
     }
 
-    //overall: 相当于卖掉usdg，换成token，扣除输出token作为fee; vault中token对应的usdg价值减少了， pool中token的量减少了
+    //overall: 卖掉usdg，换成token，扣除tokenout作为fee; vault中token对应的usdg价值减少了， pool中token的量减少了
     //读取vault当前balance和计数之间的差值，就是转入的 usdgAmount
     //按照token的最大price，计算当前存入的usdgAmount,可以换成多少token，即，本次可以存入的usdg 可以 提取多少token
     //扣减fee之前，输入usdgamount 扣减 token对应的 usdgAmounts[_token] 量;
