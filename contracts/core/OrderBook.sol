@@ -415,11 +415,11 @@ contract OrderBook is ReentrancyGuard, IOrderBook {
 
     function getUsdgMinPrice(address _otherToken) public view returns (uint256) {
         // USDG_PRECISION is the same as 1 USDG
-        uint256 redemptionAmount = IVault(vault).getRedemptionAmount(_otherToken, USDG_PRECISION);
-        uint256 otherTokenPrice = IVault(vault).getMinPrice(_otherToken);
+        uint256 redemptionAmount = IVault(vault).getRedemptionAmount(_otherToken, USDG_PRECISION);//按照token的最高价， 1USDG 能够兑换的最少token数量
+        uint256 otherTokenPrice = IVault(vault).getMinPrice(_otherToken);//token的最低价格
 
         uint256 otherTokenDecimals = IVault(vault).tokenDecimals(_otherToken);
-        return redemptionAmount.mul(otherTokenPrice).div(10 ** otherTokenDecimals);
+        return redemptionAmount.mul(otherTokenPrice).div(10 ** otherTokenDecimals); //token的最低价 × token的最少数量 =》1USDG 可以兑换的最少token价值 =》 1 USDG的价值
     }
 
     function validateSwapOrderPriceWithTriggerAboveThreshold(
@@ -969,6 +969,7 @@ contract OrderBook is ReentrancyGuard, IOrderBook {
         _receiver.sendValue(_amountOut);
     }
 
+    //tokenin 需要在调用前转入vault
     function _swap(address[] memory _path, uint256 _minOut, address _receiver) private returns (uint256) {
         if (_path.length == 2) {
             return _vaultSwap(_path[0], _path[1], _minOut, _receiver);

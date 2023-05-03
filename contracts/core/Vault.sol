@@ -565,16 +565,20 @@ contract Vault is ReentrancyGuard, IVault {
         /*
         A/DecA * PriceA = B/DecB * PriceB    => B = ( A * PriceA/PriceB ) * DecB/DecA 
         */
+        //=》 tokenIn 可以兑换的最少的 tokenOut的量
         uint256 amountOut = amountIn.mul(priceIn).div(priceOut); //没有考虑token的decimal
-        amountOut = adjustForDecimals(amountOut, _tokenIn, _tokenOut); //带着decimal的tokenout的量
+        amountOut = adjustForDecimals(amountOut, _tokenIn, _tokenOut); //带着tokenIn 的 decimal的tokenout的量
 
         // adjust usdgAmounts by the same usdgAmount as debt is shifted between the assets
+        //=> tokenIn 可以兑换的 USDG 的量， or ， 输入token的最小总价值
         uint256 usdgAmount = amountIn.mul(priceIn).div(PRICE_PRECISION);
         usdgAmount = adjustForDecimals(usdgAmount, _tokenIn, usdg); //带着decimal的usdg的量
 
+        //=>根据 tokenin的最小usdg价值，计算出以 万为基 的 fee 点数；然后 根据这个点数，扣除tokenout 作为fee
         uint256 feeBasisPoints = vaultUtils.getSwapFeeBasisPoints(_tokenIn, _tokenOut, usdgAmount); //##@@## TODO: 按照tokenin的usdg量，计算需要的swap fee系数
         uint256 amountOutAfterFees = _collectSwapFees(_tokenOut, amountOut, feeBasisPoints); //从tokenout扣除fee， 加到 feeReserves[tokenout];但是fee 本身并没有任何transfer,仍然留在池子里
 
+        //=》更新输入/输出token的 usdg 和 pool 量， 其中 USDG量不能超过最大上限， pool的余额不能小于buffer值
         _increaseUsdgAmount(_tokenIn, usdgAmount);//更新token对应的usdg 量的记录
         _decreaseUsdgAmount(_tokenOut, usdgAmount);
 
@@ -583,7 +587,8 @@ contract Vault is ReentrancyGuard, IVault {
 
         _validateBufferAmount(_tokenOut); //池子中的token量不能低于这个下限
 
-        _transferOut(_tokenOut, amountOutAfterFees, _receiver); //转出token, fee留在池子里了，fee的总量记录在feeReserves[_token]中
+        // =》 将扣除了fee的 tokenout 转出, fee留在池子里了，fee的总量记录在feeReserves[_token]中
+        _transferOut(_tokenOut, amountOutAfterFees, _receiver);
 
         emit Swap(_receiver, _tokenIn, _tokenOut, amountIn, amountOut, amountOutAfterFees, feeBasisPoints);
 
