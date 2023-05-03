@@ -633,10 +633,10 @@ contract Vault is ReentrancyGuard, IVault {
 
         if (position.size > 0 && _sizeDelta > 0) {//已经开仓过
             position.averagePrice = getNextAveragePrice(_indexToken, position.size, position.averagePrice, _isLong, price, _sizeDelta, position.lastIncreasedTime); //TODO:
-        }// ##@@## TODO:?????
+        }
 
         //返回的 fee是usd价值， 按照collateral token收取的，计入feeReserves[_collateralToken]; 返回的fee 表示为对应的usd价值
-        //      两部分fee： 本次新开仓位的仓位费， 已有仓位的保证金借款fee
+        //      两部分fee： 本次新开仓位的 开仓费， 已有仓位的保证金借款 仓位费
         uint256 fee = _collectMarginFees(_account, _collateralToken, _indexToken, _isLong, 
             _sizeDelta,  //本次开仓量
             position.size,  //当前已经持有的仓位
@@ -662,7 +662,7 @@ contract Vault is ReentrancyGuard, IVault {
         //用户新增仓位，对应需要保留多少collateraltoken => 用户转入1个ETH,开10x杠杆，则10eth对应的仓位，需要从vault中保留多少ETH作为保证金reserve下来，记在该用户的reserveamount中
         // reserve tokens to pay profits on the position
         uint256 reserveDelta = usdToTokenMax(_collateralToken, _sizeDelta);//_sizeDelta 的 usd 能换的最多的 _collateralToken 量， _sizeDelta 是新开仓增加的仓位，以USD的量表示
-        position.reserveAmount = position.reserveAmount.add(reserveDelta);//按照 开仓量 计算出的， vault中需要为用户reserve的collateraltoken的总量； 用户当前仓位，占用的保证金量
+        position.reserveAmount = position.reserveAmount.add(reserveDelta);//按照 开仓量 计算出的， vault中需要为用户reserve的collateraltoken的总量； 用户当前仓位，占用的coltoken保证金量
         _increaseReservedAmount(_collateralToken, reserveDelta); //更新全局 reservedamount，针对collateraltoken 需要从pool中预留下来作为开仓用户全额保证金的量
 
         if (_isLong) {
@@ -965,12 +965,35 @@ contract Vault is ReentrancyGuard, IVault {
         return position.size.mul(BASIS_POINTS_DIVISOR).div(position.collateral);
     }
 
-    //TODO: ?????
+    /*
+    假设 p0: 已有仓位持仓均价
+    a0：已有仓位持仓token数量
+    p1： 新增仓位现价
+    a1： 新增仓位token数量
+    s0 := a0*p0
+    s1 := a1*p1
+
+    new avg price = (p0*a0 + p1*a1)/(a0+a1) = p1*(p0*a0 + p1*a1) / (p1*a0 + p1*a1) = p1*(s0 + s1) /  ( p1*a0 + p1*a1 + p0*a0 - p0 * a0) = .../ [ p1*a1 + p0*a0  + p1*a0 - p0*a0  ]
+                    = .../[ s0 + s1 + (p1-p0) * a0 ] = p1*(s0 + s1) / (s0+s1 +  delta)
+        or
+        delta = (p1-p0)*a0
+        nextSize =  a0 * p0  + a1 * p1
+        divisor = p1*a1 + p0*a0 + delta = p1*a1 + p0*a0  + p1*a0 - p0*a0 = p1 * (a1 + a0)
+        =>  p1 * (a0 * p0  + a1 * p1) / p1 * (a1 + a0) = (a0 * p0  + a1 * p1) / (a0 + a1)
+    
+    */
+
     // for longs: nextAveragePrice = (nextPrice * nextSize)/ (nextSize + delta)
     // for shorts: nextAveragePrice = (nextPrice * nextSize) / (nextSize - delta)
-    function getNextAveragePrice(address _indexToken, uint256 _size, uint256 _averagePrice, bool _isLong, uint256 _nextPrice, uint256 _sizeDelta, uint256 _lastIncreasedTime) public view returns (uint256) {
-        (bool hasProfit, uint256 delta) = getDelta(_indexToken, _size, _averagePrice, _isLong, _lastIncreasedTime);
-        uint256 nextSize = _size.add(_sizeDelta);
+    function getNextAveragePrice(address _indexToken, 
+            uint256 _size,  //已有仓位价值， usd
+            uint256 _averagePrice,  //已有仓位的均价
+            bool _isLong, 
+            uint256 _nextPrice,  //新开仓位价格
+            uint256 _sizeDelta,  //新开仓位 usd 价值
+            uint256 _lastIncreasedTime) public view returns (uint256) {
+        (bool hasProfit, uint256 delta) = getDelta(_indexToken, _size, _averagePrice, _isLong, _lastIncreasedTime); //delta：价格变化引起的，已有仓位的usd价值变动
+        uint256 nextSize = _size.add(_sizeDelta); //已有仓位量usd价值 + 新增仓位usd价值
         uint256 divisor;
         if (_isLong) {
             divisor = hasProfit ? nextSize.add(delta) : nextSize.sub(delta);
@@ -1014,12 +1037,15 @@ contract Vault is ReentrancyGuard, IVault {
         return getDelta(_indexToken, position.size, position.averagePrice, _isLong, position.lastIncreasedTime);
     }
 
-    function getDelta(address _indexToken, uint256 _size, uint256 _averagePrice, bool _isLong, uint256 _lastIncreasedTime) public override view returns (bool, uint256) {
+    function getDelta(address _indexToken, uint256 _size, ////已有仓位价值，usd
+            uint256 _averagePrice, ////已有仓位的均价
+            bool _isLong, uint256 _lastIncreasedTime) public override view returns (bool, uint256) {
         _validate(_averagePrice > 0, 38);
         uint256 price = _isLong ? getMinPrice(_indexToken) : getMaxPrice(_indexToken);
         uint256 priceDelta = _averagePrice > price ? _averagePrice.sub(price) : price.sub(_averagePrice);
-        uint256 delta = _size.mul(priceDelta).div(_averagePrice);
-
+        uint256 delta = _size.mul(priceDelta).div(_averagePrice); // size/averageprice: 已有仓位 indextoken的数量， =》 delta： 价格变化引起的，已有仓位的价值变动
+                                                                    //or: 已有仓位，因为价格变动，新增价值按照之前的开仓价格，可以多买入的indextoken数量，相当于如果现在价格没变，但是用户按照原来的价格，
+                                                                    //仓位数量增加了这么多
         bool hasProfit;
 
         if (_isLong) {
