@@ -98,15 +98,17 @@ contract VaultUtils is IVaultUtils, Governable {
         return vault.cumulativeFundingRates(_collateralToken);
     }
 
+    //开仓量（usd计价值） 的 千1 为 positionFee
     function getPositionFee(address /* _account */, address /* _collateralToken */, address /* _indexToken */, bool /* _isLong */, uint256 _sizeDelta) public override view returns (uint256) {
         if (_sizeDelta == 0) { return 0; }
-        uint256 afterFeeUsd = _sizeDelta.mul(BASIS_POINTS_DIVISOR.sub(vault.marginFeeBasisPoints())).div(BASIS_POINTS_DIVISOR);
+        uint256 afterFeeUsd = _sizeDelta.mul(BASIS_POINTS_DIVISOR.sub(vault.marginFeeBasisPoints())).div(BASIS_POINTS_DIVISOR);// 0.1 %
         return _sizeDelta.sub(afterFeeUsd);
     }
 
     function getFundingFee(address /* _account */, address _collateralToken, address /* _indexToken */, bool /* _isLong */, uint256 _size, uint256 _entryFundingRate) public override view returns (uint256) {
         if (_size == 0) { return 0; }
 
+        //累积的fundingrate（借款feerate） - 开仓时的fundingrate，  * 持有仓位量 =》 需要支付的fundingrate
         uint256 fundingRate = vault.cumulativeFundingRates(_collateralToken).sub(_entryFundingRate);
         if (fundingRate == 0) { return 0; }
 

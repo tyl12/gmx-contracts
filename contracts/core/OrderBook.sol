@@ -538,7 +538,7 @@ contract OrderBook is ReentrancyGuard, IOrderBook {
         uint256 currentPrice = _maximizePrice
             ? IVault(vault).getMaxPrice(_indexToken) : IVault(vault).getMinPrice(_indexToken); //看多取当前高价，看空取低价
         bool isPriceValid = _triggerAboveThreshold ? currentPrice > _triggerPrice : currentPrice < _triggerPrice;
-        if (_raise) {
+        if (_raise) { //true for increaselong
             require(isPriceValid, "OrderBook: invalid price for execution");
         }
         return (currentPrice, isPriceValid);
@@ -593,8 +593,9 @@ contract OrderBook is ReentrancyGuard, IOrderBook {
     }
 
     //让vault 从调用方transfer token 到当前合约
-    //通过vault swap,将输入token 转换为collatertoken
-    //资金保管在当前合约
+    //通过vault swap,将输入token 从path【0】 转换为 path 【-1】 purchasetoken， 可以和 collatertoken 不同
+    // purchasetoken 资金保管在当前合约；
+    //如果取消订单， 则转回给用户的是 path【-1】purchase token，
     function createIncreaseOrder(
         address[] memory _path,// create时只是swap path[0]到path[-1] 可以！= collateralToken， 在create时执行
         uint256 _amountIn,
@@ -637,9 +638,9 @@ contract OrderBook is ReentrancyGuard, IOrderBook {
 
         _createIncreaseOrder(
             msg.sender,
-            _purchaseToken,
+            _purchaseToken, // increase order时， purchase order是 path【-1】，可以和collateraltoken不同
             _purchaseTokenAmount,
-            _collateralToken,
+            _collateralToken,//
             _indexToken,
             _sizeDelta,
             _isLong,
@@ -724,7 +725,7 @@ contract OrderBook is ReentrancyGuard, IOrderBook {
         if (order.purchaseToken == weth) {
             _transferOutETH(order.executionFee.add(order.purchaseTokenAmount), msg.sender);
         } else {
-            IERC20(order.purchaseToken).safeTransfer(msg.sender, order.purchaseTokenAmount);
+            IERC20(order.purchaseToken).safeTransfer(msg.sender, order.purchaseTokenAmount); //转回 purcahsetoken，非collateraltoken
             _transferOutETH(order.executionFee, msg.sender);
         }
 
@@ -743,6 +744,8 @@ contract OrderBook is ReentrancyGuard, IOrderBook {
         );
     }
 
+    //=>根据 account， orderindex定位到increaseorder记录；
+    // 将 purchasetoken转入vault，swap到collateraltoken （如果两者不同）
     function executeIncreaseOrder(address _address, 
         uint256 _orderIndex, 
         address payable _feeReceiver) override external nonReentrant {

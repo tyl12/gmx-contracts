@@ -60,7 +60,7 @@ contract Vault is ReentrancyGuard, IVault {
     uint256 public override mintBurnFeeBasisPoints = 30; // 0.3%
     uint256 public override swapFeeBasisPoints = 30; // 0.3%
     uint256 public override stableSwapFeeBasisPoints = 4; // 0.04%
-    uint256 public override marginFeeBasisPoints = 10; // 0.1%
+    uint256 public override marginFeeBasisPoints = 10; // 0.1%, 10000为基
 
     uint256 public override minProfitTime;
     bool public override hasDynamicFees = false;
@@ -607,7 +607,7 @@ contract Vault is ReentrancyGuard, IVault {
     //      按照开仓量_sizeDelta，        结合coltoken的种类， 计算需要的fee（usd计算）,从输入保证金usd价值中扣除;
     //      position.collateral         用户非全额保证金的usd价值， 这个和用户转入的collateraltoken的usd价值少了个 fee的量
     //      position.size               用户仓位， 按照usd价值计
-    //      position.reserveAmount      按照用户的仓位，计算出的，需要在vault中为用户 reserve的无杠杆保证金token的数量
+    //      position.reserveAmount      按照用户的仓位，计算出的，需要在vault中为用户 reserve的无杠杆保证金token的数量；用户持有仓位，所需的，由vault提供的保证金coltoken量
 
     //注意： 开空时，开仓时并没有更新 guaranteedUSD 和 poolamount, 是在清算时才会更新
 
@@ -620,7 +620,7 @@ contract Vault is ReentrancyGuard, IVault {
         _validateTokens(_collateralToken, _indexToken, _isLong); //开多时，collateraltoken==indextoken, 不能是stabletoken, 必须是whitelist的； 做空时，保证金必须是稳定币， 做空目标不能是稳定币
         vaultUtils.validateIncreasePosition(_account, _collateralToken, _indexToken, _sizeDelta, _isLong); //空
 
-        updateCumulativeFundingRate(_collateralToken, _indexToken);
+        updateCumulativeFundingRate(_collateralToken, _indexToken); //更新一下累计的，8小时计的， vault 因为给用户提供全额 保证金，需要收取的fee，这里只是更新，没有扣取
 
         bytes32 key = getPositionKey(_account, _collateralToken, _indexToken, _isLong);
         Position storage position = positions[key];//获取account 之前已经开仓仓位数据
@@ -633,10 +633,14 @@ contract Vault is ReentrancyGuard, IVault {
 
         if (position.size > 0 && _sizeDelta > 0) {//已经开仓过
             position.averagePrice = getNextAveragePrice(_indexToken, position.size, position.averagePrice, _isLong, price, _sizeDelta, position.lastIncreasedTime); //TODO:
-        }
+        }// ##@@## TODO:?????
 
-        //fee是按照collateral token收取的，计入feeReserves[_collateralToken]; 返回的fee 表示为对应的usd价值
-        uint256 fee = _collectMarginFees(_account, _collateralToken, _indexToken, _isLong, _sizeDelta, position.size, position.entryFundingRate); //TODO:
+        //返回的 fee是usd价值， 按照collateral token收取的，计入feeReserves[_collateralToken]; 返回的fee 表示为对应的usd价值
+        //      两部分fee： 本次新开仓位的仓位费， 已有仓位的保证金借款fee
+        uint256 fee = _collectMarginFees(_account, _collateralToken, _indexToken, _isLong, 
+            _sizeDelta,  //本次开仓量
+            position.size,  //当前已经持有的仓位
+            position.entryFundingRate); //TODO: entryFundingRate 首次为0， 每次仓位发生变化，都会更新
 
         //用户充入的保证金，以及对应的usd价值
         uint256 collateralDelta = _transferIn(_collateralToken);//vault中token的增量，就是充入的 collateral token
@@ -652,14 +656,14 @@ contract Vault is ReentrancyGuard, IVault {
         position.lastIncreasedTime = block.timestamp;
 
         _validate(position.size > 0, 30);
-        _validatePosition(position.size, position.collateral);
-        validateLiquidation(_account, _collateralToken, _indexToken, _isLong, true); //TODO:
+        _validatePosition(position.size, position.collateral);//最终持有的仓位 >= 保证金量
+        validateLiquidation(_account, _collateralToken, _indexToken, _isLong, true); //TODO: ？？？
 
         //用户新增仓位，对应需要保留多少collateraltoken => 用户转入1个ETH,开10x杠杆，则10eth对应的仓位，需要从vault中保留多少ETH作为保证金reserve下来，记在该用户的reserveamount中
         // reserve tokens to pay profits on the position
         uint256 reserveDelta = usdToTokenMax(_collateralToken, _sizeDelta);//_sizeDelta 的 usd 能换的最多的 _collateralToken 量， _sizeDelta 是新开仓增加的仓位，以USD的量表示
-        position.reserveAmount = position.reserveAmount.add(reserveDelta);//按照 开仓量 计算出的， vault中需要为用户reserve的collateraltoken的总量
-        _increaseReservedAmount(_collateralToken, reserveDelta);
+        position.reserveAmount = position.reserveAmount.add(reserveDelta);//按照 开仓量 计算出的， vault中需要为用户reserve的collateraltoken的总量； 用户当前仓位，占用的保证金量
+        _increaseReservedAmount(_collateralToken, reserveDelta); //更新全局 reservedamount，针对collateraltoken 需要从pool中预留下来作为开仓用户全额保证金的量
 
         if (_isLong) {
             // guaranteedUsd stores the sum of (position.size - position.collateral) for all positions
@@ -911,6 +915,8 @@ contract Vault is ReentrancyGuard, IVault {
         ));
     }
     //基于当前blocktime和上一次更新fundingratefactor，以 8h 为单位，累积fundingrate
+    //fundingrate的计算： 按照8 小时为计算周期，如果全部poolamount都作为reservedamount给用户提供作为保证金的情况下，用户每持有 1U的仓位，需要收取的fee；
+    //实际按照 reserve/pool 的比例计算
     function updateCumulativeFundingRate(address _collateralToken, address _indexToken) public {
         bool shouldUpdate = vaultUtils.updateCumulativeFundingRate(_collateralToken, _indexToken);
         if (!shouldUpdate) {
@@ -937,7 +943,7 @@ contract Vault is ReentrancyGuard, IVault {
     function getNextFundingRate(address _token) public override view returns (uint256) {
         if (lastFundingTimes[_token].add(fundingInterval) > block.timestamp) { return 0; }
 
-        uint256 intervals = block.timestamp.sub(lastFundingTimes[_token]).div(fundingInterval);// 有多少个 funding interval -》 在到用时，可能距离上次update cumulatative fundingrate经过了多个interval
+        uint256 intervals = block.timestamp.sub(lastFundingTimes[_token]).div(fundingInterval);// 有多少个 funding interval 周期 -》 在到用时，可能距离上次update cumulatative fundingrate经过了多个interval
         uint256 poolAmount = poolAmounts[_token];
         if (poolAmount == 0) { return 0; }
 
@@ -1138,6 +1144,7 @@ contract Vault is ReentrancyGuard, IVault {
         return (usdOut, usdOutAfterFee);
     }
 
+    //本次开仓量 >=  保证金量
     function _validatePosition(uint256 _size, uint256 _collateral) private view {
         if (_size == 0) {
             _validate(_collateral == 0, 39);
@@ -1180,13 +1187,18 @@ contract Vault is ReentrancyGuard, IVault {
     }
 
     //fee 包含 两部分， positionfee 和 funding fee
+    //      position fee是本次新增开仓量计算的 开仓费用
+    //      fundingfee是已有仓位，从上一次仓位变化，到现在为止的，保证金借款 fee； （每次仓位变化， _entryFundingRate 都会更新）
     //fee是按照collateral token收取的，计入feeReserves[_collateralToken]; 返回的是fee对应的usdg价值
     function _collectMarginFees(address _account, address _collateralToken, address _indexToken, bool _isLong, uint256 _sizeDelta, uint256 _size, uint256 _entryFundingRate) private returns (uint256) {
-        uint256 feeUsd = getPositionFee(_account, _collateralToken, _indexToken, _isLong, _sizeDelta); //TODO:
+        //本次开仓的仓位费， 根据本次开仓量计算； //开仓金额的 0.1% 为 marginfee（positionfee）
+        uint256 feeUsd = getPositionFee(_account, _collateralToken, _indexToken, _isLong, _sizeDelta); 
 
+        //已经持有仓位的借款fee，根据已有的仓位进行计算
         uint256 fundingFee = getFundingFee(_account, _collateralToken, _indexToken, _isLong, _size, _entryFundingRate); //TODO:
         feeUsd = feeUsd.add(fundingFee);
 
+        //将fee 的usd价值， 折算成 coltoken数量
         uint256 feeTokens = usdToTokenMin(_collateralToken, feeUsd);
         feeReserves[_collateralToken] = feeReserves[_collateralToken].add(feeTokens);
 
