@@ -145,14 +145,15 @@ contract VaultPriceFeed is IVaultPriceFeed {
         strictStableTokens[_token] = _isStrictStable;
     }
 
+    //返回 1e30单位的数
     function getPrice(address _token, bool _maximise, bool _includeAmmPrice, bool /* _useSwapPricing */) public override view returns (uint256) {
         uint256 price = useV2Pricing ? getPriceV2(_token, _maximise, _includeAmmPrice) : getPriceV1(_token, _maximise, _includeAmmPrice);
 
-        uint256 adjustmentBps = adjustmentBasisPoints[_token];
+        uint256 adjustmentBps = adjustmentBasisPoints[_token]; //##@@## ???
         if (adjustmentBps > 0) {
             bool isAdditive = isAdjustmentAdditive[_token];
             if (isAdditive) {
-                price = price.mul(BASIS_POINTS_DIVISOR.add(adjustmentBps)).div(BASIS_POINTS_DIVISOR);
+                price = price.mul(BASIS_POINTS_DIVISOR.add(adjustmentBps)).div(BASIS_POINTS_DIVISOR);  //调整 万 几的价格上浮
             } else {
                 price = price.mul(BASIS_POINTS_DIVISOR.sub(adjustmentBps)).div(BASIS_POINTS_DIVISOR);
             }
@@ -180,7 +181,7 @@ contract VaultPriceFeed is IVaultPriceFeed {
             price = getSecondaryPrice(_token, price, _maximise);
         }
 
-        if (strictStableTokens[_token]) {
+        if (strictStableTokens[_token]) { //稳定币价格与1 USD偏差在一定范围内， maxStrictPriceDeviation， 则直接用 1 报价； 否则，max取大的，min取小的
             uint256 delta = price > ONE_USD ? price.sub(ONE_USD) : ONE_USD.sub(price);
             if (delta <= maxStrictPriceDeviation) {
                 return ONE_USD;
@@ -241,7 +242,7 @@ contract VaultPriceFeed is IVaultPriceFeed {
         uint256 _spreadBasisPoints = spreadBasisPoints[_token];
 
         if (_maximise) {
-            return price.mul(BASIS_POINTS_DIVISOR.add(_spreadBasisPoints)).div(BASIS_POINTS_DIVISOR);
+            return price.mul(BASIS_POINTS_DIVISOR.add(_spreadBasisPoints)).div(BASIS_POINTS_DIVISOR);//调整 万 几的价格上浮
         }
 
         return price.mul(BASIS_POINTS_DIVISOR.sub(_spreadBasisPoints)).div(BASIS_POINTS_DIVISOR);

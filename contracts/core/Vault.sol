@@ -827,7 +827,10 @@ contract Vault is ReentrancyGuard, IVault {
     }
 
     function getMaxPrice(address _token) public override view returns (uint256) {
-        return IVaultPriceFeed(priceFeed).getPrice(_token, true, includeAmmPrice, useSwapPricing);
+        return IVaultPriceFeed(priceFeed).getPrice(_token, 
+        true, //max
+        includeAmmPrice, 
+        useSwapPricing);//buy/sell usdg, swap时 true
     }
 
     function getMinPrice(address _token) public override view returns (uint256) {

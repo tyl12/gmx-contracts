@@ -308,7 +308,7 @@ contract OrderBook is ReentrancyGuard, IOrderBook {
         address[] memory _path,//swap路径，ETH则为 WETH
         uint256 _amountIn,
         uint256 _minOut,
-        uint256 _triggerRatio, // tokenB / tokenA
+        uint256 _triggerRatio, // tokenB max price / tokenA min price， //比例是 priceB/priceA * 1e30 形式表示的
         bool _triggerAboveThreshold,//execute时是否检查 triggerRatio
         uint256 _executionFee,// 和msg.value保持一致
         bool _shouldWrap,  //输入是否是ETH
@@ -320,9 +320,9 @@ contract OrderBook is ReentrancyGuard, IOrderBook {
         require(_executionFee >= minExecutionFee, "OrderBook: insufficient execution fee");
 
         // always need this call because of mandatory executionFee user has to transfer in ETH
-        _transferInETH();
+        _transferInETH();//msg value 非空，则全部转成weth
 
-        if (_shouldWrap) {//使用ETH做swap, 则path[0] 传入 WETH, msg.value 为 fee + swapamount
+        if (_shouldWrap) {//使用ETH做swap, 则设置 sholdwrap, 同时 path[0] 传入 WETH, msg.value 为 fee + swapamount
             require(_path[0] == weth, "OrderBook: only weth could be wrapped");
             require(msg.value == _executionFee.add(_amountIn), "OrderBook: incorrect value transferred");
         } else {// 非eth, 则msg.value全部作为 executionfee, 且其值需和参数匹配
@@ -443,18 +443,18 @@ contract OrderBook is ReentrancyGuard, IOrderBook {
         // That's why in such scenario BNB should be used to determine price of USDG
         if (tokenA == usdg) {
             // with both _path.length == 2 or 3 we need usdg price against _path[1]
-            tokenAPrice = getUsdgMinPrice(_path[1]);//##@@## TODO: ???
+            tokenAPrice = getUsdgMinPrice(_path[1]);//##@@## TODO: ??? 什么情况下，path[0]才会是 USDG？？？
         } else {
-            tokenAPrice = IVault(vault).getMinPrice(tokenA);
+            tokenAPrice = IVault(vault).getMinPrice(tokenA); //1e30 单位价格
         }
 
         if (tokenB == usdg) {
             tokenBPrice = PRICE_PRECISION;
         } else {
-            tokenBPrice = IVault(vault).getMaxPrice(tokenB);
+            tokenBPrice = IVault(vault).getMaxPrice(tokenB); //1e30
         }
 
-        uint256 currentRatio = tokenBPrice.mul(PRICE_PRECISION).div(tokenAPrice);
+        uint256 currentRatio = tokenBPrice.mul(PRICE_PRECISION).div(tokenAPrice);//比例是 priceB/priceA * 1e30 表示的
 
         bool isValid = currentRatio > _triggerRatio;
         return isValid;
@@ -504,7 +504,7 @@ contract OrderBook is ReentrancyGuard, IOrderBook {
         IERC20(order.path[0]).safeTransfer(vault, order.amountIn);
 
         uint256 _amountOut;
-        if (order.path[order.path.length - 1] == weth && order.shouldUnwrap) {
+        if (order.path[order.path.length - 1] == weth && order.shouldUnwrap) { //如果需要ETH， 则path[-1]设置 weth， 同时设置 shouldunwrap
             _amountOut = _swap(order.path, order.minOut, address(this));
             _transferOutETH(_amountOut, payable(order.account));
         } else {
