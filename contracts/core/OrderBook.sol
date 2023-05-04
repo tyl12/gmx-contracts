@@ -339,7 +339,7 @@ contract OrderBook is ReentrancyGuard, IOrderBook {
         uint256 _amountIn,
         uint256 _minOut,
         uint256 _triggerRatio,  //TODO:
-        bool _triggerAboveThreshold, //TODO:
+        bool _triggerAboveThreshold,
         bool _shouldUnwrap,
         uint256 _executionFee
     ) private {
@@ -456,7 +456,7 @@ contract OrderBook is ReentrancyGuard, IOrderBook {
 
         uint256 currentRatio = tokenBPrice.mul(PRICE_PRECISION).div(tokenAPrice);//比例是 priceB/priceA * 1e30 表示的
 
-        bool isValid = currentRatio > _triggerRatio;
+        bool isValid = currentRatio > _triggerRatio; //TODO:???
         return isValid;
     }
 
@@ -528,6 +528,7 @@ contract OrderBook is ReentrancyGuard, IOrderBook {
         );
     }
 
+    //止盈止损
     function validatePositionOrderPrice(
         bool _triggerAboveThreshold,
         uint256 _triggerPrice,

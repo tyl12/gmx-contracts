@@ -109,7 +109,7 @@ contract VaultUtils is IVaultUtils, Governable {
         if (_size == 0) { return 0; }
 
         //累积的fundingrate（借款feerate） - 开仓时的fundingrate，  * 持有仓位量 =》 需要支付的fundingrate
-        uint256 fundingRate = vault.cumulativeFundingRates(_collateralToken).sub(_entryFundingRate);
+        uint256 fundingRate = vault.cumulativeFundingRates(_collateralToken).sub(_entryFundingRate); //##@@##
         if (fundingRate == 0) { return 0; }
 
         return _size.mul(fundingRate).div(FUNDING_RATE_PRECISION);

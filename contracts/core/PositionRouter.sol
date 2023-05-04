@@ -298,7 +298,7 @@ contract PositionRouter is BasePositionManager, IPositionRouter {
         decreasePositionRequestKeysStart = index;
     }
 
-    function createIncreasePosition( //##@@## TODO:
+    function createIncreasePosition(
         address[] memory _path,
         address _indexToken,
         uint256 _amountIn,
