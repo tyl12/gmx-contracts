@@ -57,36 +57,37 @@ contract VaultUtils is IVaultUtils, Governable {
         return position;
     }
 
+    //liquidate 时， raise  = false
     function validateLiquidation(address _account, address _collateralToken, address _indexToken, bool _isLong, bool _raise) public view override returns (uint256, uint256) {
         Position memory position = getPosition(_account, _collateralToken, _indexToken, _isLong);
         IVault _vault = vault;
 
-        (bool hasProfit, uint256 delta) = _vault.getDelta(_indexToken, position.size, position.averagePrice, _isLong, position.lastIncreasedTime);
-        uint256 marginFees = getFundingFee(_account, _collateralToken, _indexToken, _isLong, position.size, position.entryFundingRate);
-        marginFees = marginFees.add(getPositionFee(_account, _collateralToken, _indexToken, _isLong, position.size));
+        (bool hasProfit, uint256 delta) = _vault.getDelta(_indexToken, position.size, position.averagePrice, _isLong, position.lastIncreasedTime);//现价和仓位均价差异导致得收益/亏损
+        uint256 marginFees = getFundingFee(_account, _collateralToken, _indexToken, _isLong, position.size, position.entryFundingRate);//仓位费
+        marginFees = marginFees.add(getPositionFee(_account, _collateralToken, _indexToken, _isLong, position.size));//开关仓费
 
-        if (!hasProfit && position.collateral < delta) {
+        if (!hasProfit && position.collateral < delta) { //没有利润，且部分保证金 < 亏损
             if (_raise) { revert("Vault: losses exceed collateral"); }
             return (1, marginFees);
         }
 
         uint256 remainingCollateral = position.collateral;
         if (!hasProfit) {
-            remainingCollateral = position.collateral.sub(delta);
+            remainingCollateral = position.collateral.sub(delta);//保证金 - 亏损
         }
 
-        if (remainingCollateral < marginFees) {
+        if (remainingCollateral < marginFees) { // 剩余保证金 = (保证金 - 亏损 ) < fee
             if (_raise) { revert("Vault: fees exceed collateral"); }
             // cap the fees to the remainingCollateral
             return (1, remainingCollateral);
         }
 
-        if (remainingCollateral < marginFees.add(_vault.liquidationFeeUsd())) {
+        if (remainingCollateral < marginFees.add(_vault.liquidationFeeUsd())) { //剩余保证金  < fee + 清算fee
             if (_raise) { revert("Vault: liquidation fees exceed collateral"); }
             return (1, marginFees);
         }
 
-        if (remainingCollateral.mul(_vault.maxLeverage()) < position.size.mul(BASIS_POINTS_DIVISOR)) {
+        if (remainingCollateral.mul(_vault.maxLeverage()) < position.size.mul(BASIS_POINTS_DIVISOR)) { //剩余保证金 × 最大杠杆率   < 仓位 × 10000； 其中 maxLeverage = 50 * 10000; 50倍杠杆是以 BASIS_POINTS_DIVISOR 为基的
             if (_raise) { revert("Vault: maxLeverage exceeded"); }
             return (2, marginFees);
         }
@@ -103,6 +104,8 @@ contract VaultUtils is IVaultUtils, Governable {
         if (_sizeDelta == 0) { return 0; }
         uint256 afterFeeUsd = _sizeDelta.mul(BASIS_POINTS_DIVISOR.sub(vault.marginFeeBasisPoints())).div(BASIS_POINTS_DIVISOR);// 0.1 %
         return _sizeDelta.sub(afterFeeUsd);
+
+        //TODO: ??? 为何不直接：   _sizeDelta.mul ( vault.marginFeeBasisPoints().div(BASIS_POINTS_DIVISOR) )
     }
 
     function getFundingFee(address /* _account */, address _collateralToken, address /* _indexToken */, bool /* _isLong */, uint256 _size, uint256 _entryFundingRate) public override view returns (uint256) {

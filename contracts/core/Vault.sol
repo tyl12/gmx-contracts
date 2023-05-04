@@ -741,13 +741,13 @@ contract Vault is ReentrancyGuard, IVault {
                 _decreaseGuaranteedUsd(_collateralToken, _sizeDelta);//本次平仓量
             }
 
-            uint256 price = _isLong ? getMinPrice(_indexToken) : getMaxPrice(_indexToken);
+            uint256 price = _isLong ? getMinPrice(_indexToken) : getMaxPrice(_indexToken); //开多，平仓时相当于将做多的indextoken按照orderbook上的买方价格卖掉了
             emit DecreasePosition(key, _account, _collateralToken, _indexToken, _collateralDelta, _sizeDelta, _isLong, price, usdOut.sub(usdOutAfterFee));
             emit UpdatePosition(key, position.size, position.collateral, position.averagePrice, position.entryFundingRate, position.reserveAmount, position.realisedPnl, price);
         } else { //彻底关仓, 此时 平仓量 就是 用户的仓位， 即  sizeDelta == position.size
             if (_isLong) {
                 _increaseGuaranteedUsd(_collateralToken, collateral); //
-                _decreaseGuaranteedUsd(_collateralToken, _sizeDelta); // (用户仓位 - 保证金usd价值）就是vault提供的额外保证金，现在可以扣减掉了
+                _decreaseGuaranteedUsd(_collateralToken, _sizeDelta); // (用户仓位 - 部分保证金usd价值）就是vault提供的额外保证金，现在可以扣减掉了; or: vault 提供保证金 + 用户部分保证金 = 仓位
             }
 
             uint256 price = _isLong ? getMinPrice(_indexToken) : getMaxPrice(_indexToken); //关仓价  //开多ETH： 开仓时，按照ETH的最高价计算用户的开仓价， 关仓时候，按照ETH的最低价计算关仓价格
@@ -761,8 +761,9 @@ contract Vault is ReentrancyGuard, IVault {
             _decreaseGlobalShortSize(_indexToken, _sizeDelta);//平空仓，则降低vault中的做空总量
         }
 
-        if (usdOut > 0) {//用户提取保证金
-            if (_isLong) {
+        //TODO:??? 为何 long order 得_decreasePoolAmount()操作不直接在 _reduceCollateral内部处理掉，就可以和short一样了
+        if (usdOut > 0) {//用户提取保证金， 需要结合上面 _reduceCollateral() 一起来看
+            if (_isLong) { //做空，poolamount的扣减发生在 _reduceCollateral() 内部
                 _decreasePoolAmount(_collateralToken, usdToTokenMin(_collateralToken, usdOut));//平多仓时，用户提取保证金，则降低pool中保证金collateraltoken的 usd价值 （用户收到的 + fee）
             }
             uint256 amountOutAfterFees = usdToTokenMin(_collateralToken, usdOutAfterFee);//用户提取的保证金usd价值，扣除fee之后，最少可以换多少collateral token
@@ -780,7 +781,7 @@ contract Vault is ReentrancyGuard, IVault {
         }
 
         // set includeAmmPrice to false to prevent manipulated liquidations
-        includeAmmPrice = false; //????? TODO:
+        includeAmmPrice = false; //????? TODO: 为何清仓时不 includeAmmPrice， 而开关仓时为true
 
         updateCumulativeFundingRate(_collateralToken, _indexToken);
 
@@ -792,7 +793,9 @@ contract Vault is ReentrancyGuard, IVault {
         _validate(liquidationState != 0, 36);
         if (liquidationState == 2) {
             // max leverage exceeded but there is collateral remaining after deducting losses so decreasePosition instead
-            _decreasePosition(_account, _collateralToken, _indexToken, 0, position.size, _isLong, _account);
+            _decreasePosition(_account, _collateralToken, _indexToken, 0, 
+                        position.size,//全部仓位
+                        _isLong, _account);//超过最大杠杆率，但是collateral还够支付fee，故此处直接全部仓位减仓
             includeAmmPrice = true;
             return;
         }
@@ -803,8 +806,8 @@ contract Vault is ReentrancyGuard, IVault {
 
         _decreaseReservedAmount(_collateralToken, position.reserveAmount);//从vault预留的保证金中，扣除为当前仓位预留的全额保证金
         if (_isLong) {
-            _decreaseGuaranteedUsd(_collateralToken, position.size.sub(position.collateral));//用户开仓量usd价值 - 用户提供的保证金usd价值 => vault 中为用户当前仓位担保的保证金， 现在可以扣掉了
-            _decreasePoolAmount(_collateralToken, usdToTokenMin(_collateralToken, marginFees));//pool中需要扣掉保证金fee, 剩下的就全部留在vault中了
+            _decreaseGuaranteedUsd(_collateralToken, position.size.sub(position.collateral));//用户当前仓位得usd价值 - 用户提供的部分保证金usd价值 => vault 中为用户当前仓位担保的保证金， 现在可以扣掉了
+            _decreasePoolAmount(_collateralToken, usdToTokenMin(_collateralToken, marginFees));//pool中需要扣掉保证金fee, 剩下的就全部留在vault中了 （fee是不记在 poolamount内的）
         }
 
         uint256 markPrice = _isLong ? getMinPrice(_indexToken) : getMaxPrice(_indexToken); //开多ETH，爆仓价取ETH的最低价， 开孔，取最高价 （相当于开仓时买的ETH,现在需要卖掉了）
@@ -812,7 +815,9 @@ contract Vault is ReentrancyGuard, IVault {
 
         if (!_isLong && marginFees < position.collateral) {//开空， 且marginfee 小于用户的保证金usd价值， 则从保证金中扣除marginfee,
             uint256 remainingCollateral = position.collateral.sub(marginFees);
-            _increasePoolAmount(_collateralToken, usdToTokenMin(_collateralToken, remainingCollateral)); //TODO: 开空仓时，并没有更新poolamount, 此处更新一下， 用户的保证金可以换成最少的collateraltoken量
+            _increasePoolAmount(_collateralToken, usdToTokenMin(_collateralToken, remainingCollateral)); //扣掉fee之后，剩下的保证金全部充入poolamount
+             //TODO: 开空仓时，并没有更新poolamount, 此处更新一下， 用户的保证金可以换成最少的collateraltoken量
+             //TODO: 为何不在开仓时就记录，此处扣减即可？？？？？
         }
 
         if (!_isLong) {
@@ -824,7 +829,7 @@ contract Vault is ReentrancyGuard, IVault {
         // pay the fee receiver using the pool, we assume that in general the liquidated amount should be sufficient to cover
         // the liquidation fees
         _decreasePoolAmount(_collateralToken, usdToTokenMin(_collateralToken, liquidationFeeUsd));
-        _transferOut(_collateralToken, usdToTokenMin(_collateralToken, liquidationFeeUsd), _feeReceiver);
+        _transferOut(_collateralToken, usdToTokenMin(_collateralToken, liquidationFeeUsd), _feeReceiver); //单独一笔清仓费给到调用方
 
         includeAmmPrice = true;
     }
@@ -1113,7 +1118,7 @@ contract Vault is ReentrancyGuard, IVault {
                 usdOut 不够，则从用户collateral中扣fee;
                 
             做多时：
-                //无1.
+                //无1. poolamount的扣减发生在外部调用后，此处未处理
                 如果需要提取保证金，则从position.collateral 中扣减
                 usdOut 中记录了需要向用户转入的已实现利润 + 提取的部分保证金
                 
@@ -1156,7 +1161,7 @@ contract Vault is ReentrancyGuard, IVault {
 
             // transfer realised losses to the pool for short positions
             // realised losses for long positions are not transferred here as
-            // _increasePoolAmount was already called in increasePosition for longs
+            // _increasePoolAmount was already called in increasePosition for longs.     TODO: ？？？？？
             if (!_isLong) { 
                 uint256 tokenAmount = usdToTokenMin(_collateralToken, adjustedDelta);
                 _increasePoolAmount(_collateralToken, tokenAmount);
@@ -1183,12 +1188,16 @@ contract Vault is ReentrancyGuard, IVault {
         uint256 usdOutAfterFee = usdOut;
         if (usdOut > fee) {
             usdOutAfterFee = usdOut.sub(fee);// TODO:??? 已实现利润足够时，直接从利润中扣除fee,  不够时，则从coltoken中扣取   //但 _collectMarginFees 中，已经用coltoken进行记账，不会有问题么？？？
+            //usdOut是需要从poolamount中提取的价值，提取出来，一部分作为fee，一部分转回用户
         } else {
             position.collateral = position.collateral.sub(fee);
             if (_isLong) {
                 uint256 feeTokens = usdToTokenMin(_collateralToken, fee);
                 _decreasePoolAmount(_collateralToken, feeTokens);
             }
+            //usdOut是用户提取总价值，fee已经另外从部分保证金中扣减了
+
+            //TODO: ???做空时，fee 为什么不从poolamount中扣取？？？？
         }
 
         emit UpdatePnl(key, hasProfit, adjustedDelta);
@@ -1278,6 +1287,7 @@ contract Vault is ReentrancyGuard, IVault {
         tokenBalances[_token] = nextBalance;
     }
 
+    //poolamount中，不计入 fee
     function _increasePoolAmount(address _token, uint256 _amount) private {
         poolAmounts[_token] = poolAmounts[_token].add(_amount);
         uint256 balance = IERC20(_token).balanceOf(address(this));
