@@ -17,11 +17,11 @@ contract Vault is ReentrancyGuard, IVault {
     using SafeERC20 for IERC20;
 
     struct Position {
-        uint256 size; //仓位
-        uint256 collateral;//质押token的usd价值， 保证金的USD价值
-        uint256 averagePrice;
-        uint256 entryFundingRate;
-        uint256 reserveAmount;
+        uint256 size; //仓位，持仓的usd价值
+        uint256 collateral;//用户提供的coltoken的usd价值， 部分保证金的USD价值
+        uint256 averagePrice; //当前仓位的持仓均价，每次仓位有变化时更新
+        uint256 entryFundingRate; //当前仓位开始持仓时的fundingrate，每次仓位有变化时更新，用于计算 仓位费
+        uint256 reserveAmount; //vault中为当前用户reserve的coltoken amount， 相当于vault中给用户提供的 coltoken 形式的全额保证金（包括了用户自己提供的部分保证金）
         int256 realisedPnl;
         uint256 lastIncreasedTime;
     }
@@ -627,7 +627,7 @@ contract Vault is ReentrancyGuard, IVault {
 
         uint256 price = _isLong ? getMaxPrice(_indexToken) : getMinPrice(_indexToken); //开仓价格
 
-        if (position.size == 0) {//没有开仓过，则就是本次价格
+        if (position.size == 0) {//没有开仓过，则就是本次价格 ， 注意是indextoken价格
             position.averagePrice = price;
         }
 
@@ -673,7 +673,7 @@ contract Vault is ReentrancyGuard, IVault {
             _increaseGuaranteedUsd(_collateralToken, _sizeDelta.add(fee)); //用户开仓量 - （保证金的usd价值 - fee）  =>  vault 为用户提供的保证价值
             _decreaseGuaranteedUsd(_collateralToken, collateralDeltaUsd);
             // treat the deposited collateral as part of the pool
-            _increasePoolAmount(_collateralToken, collateralDelta);//用户存入valut的质押token量 - 扣除的usd计的fee 可买到的最小 coltoken量
+            _increasePoolAmount(_collateralToken, collateralDelta);//用户存入valut的质押token量 - 扣除的usd计的fee 可买到的最小 coltoken量  => poolamount 中不包括  fee
             // fees need to be deducted from the pool since fees are deducted from position.collateral
             // and collateral is treated as part of the pool
             _decreasePoolAmount(_collateralToken, usdToTokenMin(_collateralToken, fee));// 和前面 _collectMarginFees 中的 usdToTokenMin()调用相对应
@@ -681,7 +681,7 @@ contract Vault is ReentrancyGuard, IVault {
             if (globalShortSizes[_indexToken] == 0) {
                 globalShortAveragePrices[_indexToken] = price;
             } else {
-                globalShortAveragePrices[_indexToken] = getNextGlobalShortAveragePrice(_indexToken, price, _sizeDelta);
+                globalShortAveragePrices[_indexToken] = getNextGlobalShortAveragePrice(_indexToken, price, _sizeDelta); //TODO: ???
             }
 
             _increaseGlobalShortSize(_indexToken, _sizeDelta);
@@ -718,7 +718,7 @@ contract Vault is ReentrancyGuard, IVault {
         uint256 collateral = position.collateral; //用户缴纳的当前仓位 （部分） 保证金的usd价值
         // scrop variables to avoid stack too deep errors
         {
-        uint256 reserveDelta = position.reserveAmount.mul(_sizeDelta).div(position.size);//TODO: 按照 （本次平仓量/总仓位）比例获得可以释放的 作为质押资金的collateral token的量
+        uint256 reserveDelta = position.reserveAmount.mul(_sizeDelta).div(position.size);// 按照 （本次平仓量/总仓位）比例获得可以释放的 作为质押资金的collateral token的量
         position.reserveAmount = position.reserveAmount.sub(reserveDelta);
         _decreaseReservedAmount(_collateralToken, reserveDelta); //降低全局质押资金的记录
         }
@@ -734,7 +734,7 @@ contract Vault is ReentrancyGuard, IVault {
             _validatePosition(position.size, position.collateral); //仓位 >= 部分保证金
             validateLiquidation(_account, _collateralToken, _indexToken, _isLong, true);
 
-            if (_isLong) {
+            if (_isLong) { // vault提供的全额保证金 = 原始保证金 -(本次平仓量) + 本次平仓提走的保证金
                 //本次平仓实际提取走的部分保证金， 需要vault来补足担保
                 _increaseGuaranteedUsd(_collateralToken, collateral.sub(position.collateral)); // collateral: 本次平仓前， 部分保证金价值; position.collateral: 本次平仓后，部分保证金价值 =》本次平仓操作引起的部分保证金变化
                 //本次平仓量，不再需要vault担保
@@ -763,7 +763,7 @@ contract Vault is ReentrancyGuard, IVault {
 
         //TODO:??? 为何 long order 得_decreasePoolAmount()操作不直接在 _reduceCollateral内部处理掉，就可以和short一样了
         if (usdOut > 0) {//用户提取保证金， 需要结合上面 _reduceCollateral() 一起来看
-            if (_isLong) { //做空，poolamount的扣减发生在 _reduceCollateral() 内部
+            if (_isLong) { // short， 开仓时，collateral就没有计入 poolamount中，故平仓时也不需要扣减
                 _decreasePoolAmount(_collateralToken, usdToTokenMin(_collateralToken, usdOut));//平多仓时，用户提取保证金，则降低pool中保证金collateraltoken的 usd价值 （用户收到的 + fee）
             }
             uint256 amountOutAfterFees = usdToTokenMin(_collateralToken, usdOutAfterFee);//用户提取的保证金usd价值，扣除fee之后，最少可以换多少collateral token
@@ -1024,7 +1024,7 @@ contract Vault is ReentrancyGuard, IVault {
             uint256 _size,  //已有仓位价值， usd
             uint256 _averagePrice,  //已有仓位的均价
             bool _isLong, 
-            uint256 _nextPrice,  //新开仓位价格
+            uint256 _nextPrice,  //新开仓位价格, indextoken 价格
             uint256 _sizeDelta,  //新开仓位 usd 价值
             uint256 _lastIncreasedTime) public view returns (uint256) {
         (bool hasProfit, uint256 delta) = getDelta(_indexToken, _size, _averagePrice, _isLong, _lastIncreasedTime); //delta：价格变化引起的，已有仓位的usd价值变动
@@ -1313,7 +1313,7 @@ contract Vault is ReentrancyGuard, IVault {
         tokenBalances[_token] = nextBalance;
     }
 
-    //poolamount中，不计入 fee
+    //poolamount中， 不包括 fee
     function _increasePoolAmount(address _token, uint256 _amount) private {
         poolAmounts[_token] = poolAmounts[_token].add(_amount);
         uint256 balance = IERC20(_token).balanceOf(address(this));
