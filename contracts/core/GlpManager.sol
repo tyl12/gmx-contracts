@@ -90,6 +90,7 @@ contract GlpManager is ReentrancyGuard, Governable, IGlpManager {
         cooldownDuration = _cooldownDuration;
     }
 
+    //TODO: 对应什么场景？？
     function setAumAdjustment(uint256 _aumAddition, uint256 _aumDeduction) external onlyGov {
         aumAddition = _aumAddition;
         aumDeduction = _aumDeduction;
@@ -206,6 +207,11 @@ contract GlpManager is ReentrancyGuard, Governable, IGlpManager {
             .div(BASIS_POINTS_DIVISOR);
     }
 
+    /*
+        计算vault中 usdg价值 和 glp总供应量，计算出 单位 usdg 对应的 glp量
+        输入token,折算成usd价值
+        两者相乘， 计算出应该mint的glp数量给用户
+    */
     function _addLiquidity(address _fundingAccount, address _account, address _token, uint256 _amount, uint256 _minUsdg, uint256 _minGlp) private returns (uint256) {
         require(_amount > 0, "GlpManager: invalid _amount");
 
@@ -217,7 +223,7 @@ contract GlpManager is ReentrancyGuard, Governable, IGlpManager {
         uint256 usdgAmount = vault.buyUSDG(_token, address(this));
         require(usdgAmount >= _minUsdg, "GlpManager: insufficient USDG output");
 
-        uint256 mintAmount = aumInUsdg == 0 ? usdgAmount : usdgAmount.mul(glpSupply).div(aumInUsdg);//????
+        uint256 mintAmount = aumInUsdg == 0 ? usdgAmount : usdgAmount.mul(glpSupply).div(aumInUsdg);// 本次购买前， glp 总供应量 / usd总价值 =》 单位usd 对应的 glp数量  =》  * 输入token 的usd价值  = 本次购买到的 glp量
         require(mintAmount >= _minGlp, "GlpManager: insufficient GLP output");
 
         IMintable(glp).mint(_account, mintAmount);
@@ -229,9 +235,12 @@ contract GlpManager is ReentrancyGuard, Governable, IGlpManager {
         return mintAmount;
     }
 
+    /*
+    输入glp, 提取tokenout
+    */
     function _removeLiquidity(address _account, address _tokenOut, uint256 _glpAmount, uint256 _minOut, address _receiver) private returns (uint256) {
         require(_glpAmount > 0, "GlpManager: invalid _glpAmount");
-        require(lastAddedAt[_account].add(cooldownDuration) <= block.timestamp, "GlpManager: cooldown duration not yet passed");
+        require(lastAddedAt[_account].add(cooldownDuration) <= block.timestamp, "GlpManager: cooldown duration not yet passed"); //尼玛
 
         // calculate aum before sellUSDG
         uint256 aumInUsdg = getAumInUsdg(false);
