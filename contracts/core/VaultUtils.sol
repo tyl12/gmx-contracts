@@ -58,6 +58,21 @@ contract VaultUtils is IVaultUtils, Governable {
     }
 
     //liquidate 时， raise  = false
+    /*
+    亏损时：
+        剩余保证金  =（保证金 - 亏损）
+    没有亏损时：
+        剩余保证金  = 当前保证金
+    判断：
+        剩余保证金 < 0                                 => 扣减 关仓费 + 仓位费 
+        剩余保证金不足以支付 关仓费 + 仓位费               => 扣减所有剩余保证金
+        剩余保证金不足以支付  关仓费 + 仓位费 + 清算费      => 扣减 关仓费 + 仓位费 
+        =》 引起清算
+        剩余保证金 * 最大杠杆率 < 当前持有的仓位           => 扣减 关仓费 + 仓位费 
+        =》 不清算，进入全部关仓流程                      => 扣减 关仓费 + 仓位费 
+    
+    返回的 marginFees 包括 全部关仓时的 关仓费 + 仓位费，没有包括清仓费
+    */
     function validateLiquidation(address _account, address _collateralToken, address _indexToken, bool _isLong, bool _raise) public view override returns (uint256, uint256) {
         Position memory position = getPosition(_account, _collateralToken, _indexToken, _isLong);
         IVault _vault = vault;
@@ -73,7 +88,7 @@ contract VaultUtils is IVaultUtils, Governable {
 
         uint256 remainingCollateral = position.collateral;
         if (!hasProfit) {
-            remainingCollateral = position.collateral.sub(delta);//保证金 - 亏损
+            remainingCollateral = position.collateral.sub(delta);//没有利润， 剩余保证金 remainingCollateral = 保证金 - 亏损
         }
 
         if (remainingCollateral < marginFees) { // 剩余保证金 = (保证金 - 亏损 ) < fee
@@ -82,7 +97,7 @@ contract VaultUtils is IVaultUtils, Governable {
             return (1, remainingCollateral);
         }
 
-        if (remainingCollateral < marginFees.add(_vault.liquidationFeeUsd())) { //剩余保证金  < fee + 清算fee
+        if (remainingCollateral < marginFees.add(_vault.liquidationFeeUsd())) { // 剩余保证金  < fee + 清算fee
             if (_raise) { revert("Vault: liquidation fees exceed collateral"); }
             return (1, marginFees);
         }

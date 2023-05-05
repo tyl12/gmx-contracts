@@ -657,7 +657,7 @@ contract Vault is ReentrancyGuard, IVault {
 
         _validate(position.size > 0, 30);
         _validatePosition(position.size, position.collateral);//最终持有的仓位 >= 保证金量
-        validateLiquidation(_account, _collateralToken, _indexToken, _isLong, true); //TODO: ？？？
+        validateLiquidation(_account, _collateralToken, _indexToken, _isLong, true);
 
         //用户新增仓位，对应需要保留多少collateraltoken => 用户转入1个ETH,开10x杠杆，则10eth对应的仓位，需要从vault中保留多少ETH作为保证金reserve下来，记在该用户的reserveamount中
         // reserve tokens to pay profits on the position
@@ -732,7 +732,7 @@ contract Vault is ReentrancyGuard, IVault {
             position.size = position.size.sub(_sizeDelta);//降低仓位
 
             _validatePosition(position.size, position.collateral); //仓位 >= 部分保证金
-            validateLiquidation(_account, _collateralToken, _indexToken, _isLong, true); //TODO: ？？？？？
+            validateLiquidation(_account, _collateralToken, _indexToken, _isLong, true);
 
             if (_isLong) {
                 //本次平仓实际提取走的部分保证金， 需要vault来补足担保
@@ -774,7 +774,21 @@ contract Vault is ReentrancyGuard, IVault {
         return 0;
     }
 
-    //保证金足够，则直接_decreasePosition
+    /*
+        剩余保证金是否足够，足够则直接_decreasePosition
+        不够，进入后续清算流程：
+            将fee 计入 feeReserves[coltoken]
+
+            从reservedamount中，扣减 当前仓位的 全额保证金
+            开多：
+                当前仓位 - 部分保证金， 就是vault提供的额外保证金价值， 扣减掉
+                poolamount 中扣减 fee
+            开空， 且 部分保证金足够支付fee：
+                保证金中扣fee
+                剩余保证金全部充入 poolamount
+            
+            poolamount中扣去 liquidationFeeUsd, 以coltoken形式给到  _feeReceiver
+    */
     function liquidatePosition(address _account, address _collateralToken, address _indexToken, bool _isLong, address _feeReceiver) external override nonReentrant {
         if (inPrivateLiquidationMode) {
             _validate(isLiquidator[msg.sender], 34);
@@ -789,6 +803,18 @@ contract Vault is ReentrancyGuard, IVault {
         Position memory position = positions[key];
         _validate(position.size > 0, 35);
 
+            /*
+            亏损时：
+                剩余保证金  =（保证金 - 亏损）
+            没有亏损时：
+                剩余保证金  = 当前保证金
+            判断：
+                剩余保证金不足以支付 开仓费 + 仓位费
+                剩余保证金不足以支付  开仓费 + 仓位费 + 清算费
+                =》 引起清算
+                剩余保证金 * 最大杠杆率 < 当前持有的仓位
+                =》 不清算，进入全部关仓流程
+            */
         (uint256 liquidationState, uint256 marginFees) = validateLiquidation(_account, _collateralToken, _indexToken, _isLong, false);
         _validate(liquidationState != 0, 36);
         if (liquidationState == 2) {
