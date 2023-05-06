@@ -83,7 +83,8 @@ contract PositionManager is BasePositionManager {
     //          不需要转换： token直接从用户转入当前合约，扣fee,剩余的从当前合约转入vault, 调用 IRouter(_router).pluginIncreasePosition => IVault(vault).increasePosition
     function increasePosition(
         address[] memory _path, //如果需要通过vault做swap,则[tokenIn, tokenOut]， 如果本身就是indexToken,则[indexToken]
-        address _indexToken,   //做多的目标token, 做多ETH,则为ETH   TODO: 为何需要单独传？不使用 path[-1]??  ans: path[-1] 作为collateraltoken， 可以和 indextoken不同， 在vault中处理
+        address _indexToken,   //做多的目标token, 做多ETH,则为ETH   TODO: 为何需要单独传？不使用 path[-1]??  ans: 代码层面，path[-1] 可以和 collateraltoken 不同； 
+                                //做short, collateraltoken 为USD, indextoken 为 ETH；  但做long时，collateraltoken 必和 indextoken 一样， 在vault中判断
         uint256 _amountIn,
         uint256 _minOut,
         uint256 _sizeDelta,
@@ -202,7 +203,7 @@ contract PositionManager is BasePositionManager {
         address _collateralToken,
         address _indexToken,
         bool _isLong,
-        address _feeReceiver //##@@## TODO:
+        address _feeReceiver //##@@## 收取 liquidationFeeUsd，以collateraltoken形式； marginfee(positionfee+fundingfee)是单独扣减的
     ) external nonReentrant onlyLiquidator {
         address _vault = vault;
         address timelock = IVault(_vault).gov();

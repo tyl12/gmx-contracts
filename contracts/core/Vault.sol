@@ -706,7 +706,7 @@ contract Vault is ReentrancyGuard, IVault {
     }
 
     function _decreasePosition(address _account, address _collateralToken, address _indexToken, uint256 _collateralDelta, uint256 _sizeDelta, bool _isLong, address _receiver) private returns (uint256) {
-        vaultUtils.validateDecreasePosition(_account, _collateralToken, _indexToken, _collateralDelta, _sizeDelta, _isLong, _receiver);//TODO:
+        vaultUtils.validateDecreasePosition(_account, _collateralToken, _indexToken, _collateralDelta, _sizeDelta, _isLong, _receiver);
         updateCumulativeFundingRate(_collateralToken, _indexToken);//更新当前的累计fundingrate, 
 
         bytes32 key = getPositionKey(_account, _collateralToken, _indexToken, _isLong);
@@ -812,6 +812,7 @@ contract Vault is ReentrancyGuard, IVault {
                 剩余保证金不足以支付 开仓费 + 仓位费
                 剩余保证金不足以支付  开仓费 + 仓位费 + 清算费
                 =》 引起清算
+
                 剩余保证金 * 最大杠杆率 < 当前持有的仓位
                 =》 不清算，进入全部关仓流程
             */
@@ -839,7 +840,7 @@ contract Vault is ReentrancyGuard, IVault {
         uint256 markPrice = _isLong ? getMinPrice(_indexToken) : getMaxPrice(_indexToken); //开多ETH，爆仓价取ETH的最低价， 开孔，取最高价 （相当于开仓时买的ETH,现在需要卖掉了）
         emit LiquidatePosition(key, _account, _collateralToken, _indexToken, _isLong, position.size, position.collateral, position.reserveAmount, position.realisedPnl, markPrice);
 
-        if (!_isLong && marginFees < position.collateral) {//开空， 且marginfee 小于用户的保证金usd价值， 则从保证金中扣除marginfee,
+        if (!_isLong && marginFees < position.collateral) {//开空， 且marginfee 小于用户的保证金usd价值， 则从保证金中扣除marginfee,  //TODO: ?????
             uint256 remainingCollateral = position.collateral.sub(marginFees);
             _increasePoolAmount(_collateralToken, usdToTokenMin(_collateralToken, remainingCollateral)); //扣掉fee之后，剩下的保证金全部充入poolamount
              //TODO: 开空仓时，并没有更新poolamount, 此处更新一下， 用户的保证金可以换成最少的collateraltoken量
@@ -1169,6 +1170,18 @@ contract Vault is ReentrancyGuard, IVault {
         adjustedDelta = _sizeDelta.mul(delta).div(position.size);// 总利润 * 关仓量/仓位总量 =》 本次关仓部分仓位 的已实现利润
         }
 
+        /*
+        下面这部分等价于
+        if (adjustedDelta >0){ //有损益
+            if (hasProfit){ //收益
+                空单收益需要从poolamount中提取
+            }
+            else{ //亏损
+                空单亏损需要转入poolamount
+            }
+        }
+        */
+
         uint256 usdOut;
         // transfer profits out
         if (hasProfit && adjustedDelta > 0) {
@@ -1187,7 +1200,7 @@ contract Vault is ReentrancyGuard, IVault {
 
             // transfer realised losses to the pool for short positions
             // realised losses for long positions are not transferred here as
-            // _increasePoolAmount was already called in increasePosition for longs.     TODO: ？？？？？
+            // _increasePoolAmount was already called in increasePosition for longs.    tony: long order的collateral在开仓时，就已经计入 poolamount,故此处只需要处理shortorder的loss即可
             if (!_isLong) { 
                 uint256 tokenAmount = usdToTokenMin(_collateralToken, adjustedDelta);
                 _increasePoolAmount(_collateralToken, tokenAmount);
@@ -1213,7 +1226,7 @@ contract Vault is ReentrancyGuard, IVault {
         // else deduct the fee from the position's collateral
         uint256 usdOutAfterFee = usdOut;
         if (usdOut > fee) {
-            usdOutAfterFee = usdOut.sub(fee);// TODO:??? 已实现利润足够时，直接从利润中扣除fee,  不够时，则从coltoken中扣取   //但 _collectMarginFees 中，已经用coltoken进行记账，不会有问题么？？？
+            usdOutAfterFee = usdOut.sub(fee);// TODO:??? 已实现利润足够时，直接从利润中扣除fee,  不够时，则从coltoken中扣取   //但 _collectMarginFees() 中，已经用coltoken进行记账，不会有问题么？？？
             //usdOut是需要从poolamount中提取的价值，提取出来，一部分作为fee，一部分转回用户
         } else {
             position.collateral = position.collateral.sub(fee);
@@ -1282,7 +1295,7 @@ contract Vault is ReentrancyGuard, IVault {
         uint256 feeUsd = getPositionFee(_account, _collateralToken, _indexToken, _isLong, _sizeDelta); 
 
         //已经持有仓位的借款fee，根据已有的仓位进行计算
-        uint256 fundingFee = getFundingFee(_account, _collateralToken, _indexToken, _isLong, _size, _entryFundingRate); //TODO:
+        uint256 fundingFee = getFundingFee(_account, _collateralToken, _indexToken, _isLong, _size, _entryFundingRate);
         feeUsd = feeUsd.add(fundingFee);
 
         //将fee 的usd价值， 折算成 coltoken数量
