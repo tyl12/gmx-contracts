@@ -684,7 +684,7 @@ contract Vault is ReentrancyGuard, IVault {
                 globalShortAveragePrices[_indexToken] = getNextGlobalShortAveragePrice(_indexToken, price, _sizeDelta); //TODO: ???
             }
 
-            _increaseGlobalShortSize(_indexToken, _sizeDelta);
+            _increaseGlobalShortSize(_indexToken, _sizeDelta); // NOTE: for short, indextoken !! not collateraltoken
         }
 
         emit IncreasePosition(key, _account, _collateralToken, _indexToken, collateralDeltaUsd, _sizeDelta, _isLong, price, fee); //开仓价格， fee等
@@ -1017,6 +1017,10 @@ contract Vault is ReentrancyGuard, IVault {
         divisor = p1*a1 + p0*a0 + delta = p1*a1 + p0*a0  + p1*a0 - p0*a0 = p1 * (a1 + a0)
         =>  p1 * (a0 * p0  + a1 * p1) / p1 * (a1 + a0) = (a0 * p0  + a1 * p1) / (a0 + a1)
     
+        or
+        pavg = (s0+s1)/(s0/p0 + s1/p1) = p1 * (s0+s1) / (s0*p1/p0 + s1) = p1 * Snext / ( s0*p1/p0 + s1)
+        delta = (p1-p0) * s0/p0 = p1 * s0/p0 - s0 = s0 * p1 / p0 - s0
+        =》 pavg = p1 * Snext / (delta + s0 + s1) = p1 * Snext / (delta + Snext)
     */
 
     // for longs: nextAveragePrice = (nextPrice * nextSize)/ (nextSize + delta)

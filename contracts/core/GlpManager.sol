@@ -162,9 +162,9 @@ contract GlpManager is ReentrancyGuard, Governable, IGlpManager {
                     (uint256 delta, bool hasProfit) = getGlobalShortDelta(token, price, size);
                     if (!hasProfit) {
                         // add losses from shorts
-                        aum = aum.add(delta);
+                        aum = aum.add(delta);//trader loss, vault gain
                     } else {
-                        shortProfits = shortProfits.add(delta);
+                        shortProfits = shortProfits.add(delta); //trader profit, vault loss
                     }
                 }
 
@@ -179,11 +179,13 @@ contract GlpManager is ReentrancyGuard, Governable, IGlpManager {
         return aumDeduction > aum ? 0 : aum.sub(aumDeduction);
     }
 
-    function getGlobalShortDelta(address _token, uint256 _price, uint256 _size) public view returns (uint256, bool) {
+    function getGlobalShortDelta(address _token, uint256 _price, 
+            uint256 _size) // z做空仓位，USD
+            public view returns (uint256, bool) {
         uint256 averagePrice = getGlobalShortAveragePrice(_token);
         uint256 priceDelta = averagePrice > _price ? averagePrice.sub(_price) : _price.sub(averagePrice);
         uint256 delta = _size.mul(priceDelta).div(averagePrice);
-        return (delta, averagePrice > _price);
+        return (delta, averagePrice > _price); //返回损益量，usd
     }
 
     function getGlobalShortAveragePrice(address _token) public view returns (uint256) {
